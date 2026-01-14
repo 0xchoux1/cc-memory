@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "cc-memory": {
+      "command": "node",
+      "args": ["/home/choux1/src/github.com/0xchoux1/cc-memory/dist/index.js"],
+      "env": {
+        "MEMORY_DATA_PATH": "/home/choux1/.claude-memory",
+        "MEMORY_CLEANUP_INTERVAL": "300000"
+      }
+    }
+  }
+}
