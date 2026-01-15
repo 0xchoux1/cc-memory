@@ -191,7 +191,7 @@ describe('MemoryManager', () => {
     });
 
     it('should recall only from semantic memory', () => {
-      const result = manager.recall('security', {
+      const result = manager.recall('HTTPS', {
         includeWorking: false,
         includeEpisodic: false,
         includeSemantic: true,

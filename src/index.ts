@@ -51,10 +51,46 @@ const memoryManager = new MemoryManager({
 // Create tool handlers
 const handlers = createToolHandlers(memoryManager);
 
+// Server instructions for Claude
+const SERVER_INSTRUCTIONS = `
+# cc-memory 使用ルール
+
+cc-memory は Claude の持続的記憶システムです。以下のルールに従って使用してください。
+
+## セッション開始時（重要）
+
+新しいセッションでユーザーの最初のメッセージを受け取ったら、必ず以下を実行すること：
+
+1. memory_recall でユーザーの発言に関連する記憶を検索
+2. semantic_search(type: "preference") でユーザーの好みを確認
+3. 検索結果を踏まえて応答する
+
+## 記憶の保存タイミング
+
+- ユーザーの好み・設定を学んだ → semantic_create (type: preference)
+- 重要な事実を学んだ → semantic_create (type: fact)
+- タスクが完了した → episode_record (type: success/milestone)
+- エラーを解決した → episode_record (type: error)
+- パターンを発見した → semantic_create (type: pattern)
+
+## importance の目安
+
+- 8-10: 絶対に覚えておくべき（ユーザーの重要な好み、重大なマイルストーン）
+- 5-7: 一般的な記憶（通常のタスク完了、学んだ事実）
+- 1-4: 軽微な記憶（小さな修正、一時的な情報）
+
+## 注意事項
+
+- ユーザーに「覚えて」と言われなくても、重要な情報は自主的に記憶すること
+- 過去の記憶と矛盾する新情報があれば、semantic_update で更新すること
+`.trim();
+
 // Create MCP server
 const server = new McpServer({
   name: 'cc-memory',
   version: '1.0.0',
+}, {
+  instructions: SERVER_INSTRUCTIONS,
 });
 
 // Register tools

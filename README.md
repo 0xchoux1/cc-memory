@@ -19,6 +19,7 @@ CC-Memory provides a three-layer memory architecture inspired by human cognitive
 - Session-based context management
 - TTL-based automatic expiration
 - Knowledge graph with entity relations
+- **Built-in server instructions** - Claude automatically learns how to use cc-memory
 
 ## Installation
 
@@ -322,6 +323,17 @@ Parameters:
 |----------|---------|-------------|
 | `MEMORY_DATA_PATH` | `~/.claude-memory` | Directory for database storage |
 | `MEMORY_CLEANUP_INTERVAL` | `300000` (5 min) | Interval for expired item cleanup |
+
+## Server Instructions
+
+cc-memory provides built-in instructions to Claude via MCP's `instructions` feature. When Claude connects to this server, it automatically receives guidance on:
+
+- **Session startup**: Search for relevant memories and user preferences at the start of each session
+- **When to save memories**: Guidelines for saving preferences, facts, episodes, and patterns
+- **Importance levels**: How to assign appropriate importance (1-10) to memories
+- **Auto-learning**: Claude is instructed to proactively save important information without explicit user requests
+
+This means Claude will automatically use cc-memory effectively without requiring manual configuration in CLAUDE.md (though additional project-specific instructions can still be added there).
 
 ## Development
 
