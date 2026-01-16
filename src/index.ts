@@ -36,7 +36,30 @@ import {
   SmartRecallSchema,
   MemoryDecaySchema,
   MemoryBoostSchema,
+  // Tachikoma & Agent & Wisdom schemas
+  TachikomaInitSchema,
+  TachikomaStatusSchema,
+  TachikomaExportSchema,
+  TachikomaImportSchema,
+  TachikomaConflictsSchema,
+  TachikomaResolveConflictSchema,
+  AgentRegisterSchema,
+  AgentGetSchema,
+  AgentListSchema,
+  PatternCreateSchema,
+  PatternGetSchema,
+  PatternListSchema,
+  PatternConfirmSchema,
+  InsightCreateSchema,
+  InsightGetSchema,
+  InsightListSchema,
+  InsightValidateSchema,
+  WisdomCreateSchema,
+  WisdomGetSchema,
+  WisdomSearchSchema,
+  WisdomApplySchema,
 } from './server/tools.js';
+import { SqliteStorage } from './storage/SqliteStorage.js';
 
 // Configuration from environment
 const DATA_PATH = process.env.MEMORY_DATA_PATH || join(homedir(), '.claude-memory');
@@ -49,7 +72,8 @@ const memoryManager = new MemoryManager({
 });
 
 // Create tool handlers
-const handlers = createToolHandlers(memoryManager);
+const storage = memoryManager.getStorage();
+const handlers = createToolHandlers(memoryManager, storage);
 
 // Server instructions for Claude
 const SERVER_INSTRUCTIONS = `
@@ -330,6 +354,221 @@ server.tool(
   MemoryBoostSchema.shape,
   async (args) => {
     const result = handlers.memory_boost(args as z.infer<typeof MemoryBoostSchema>);
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+// Tachikoma Parallelization Tools
+server.tool(
+  'tachikoma_init',
+  'Initialize Tachikoma parallelization (set individual ID and name)',
+  TachikomaInitSchema.shape,
+  async (args) => {
+    const result = handlers.tachikoma_init(args as z.infer<typeof TachikomaInitSchema>);
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  'tachikoma_status',
+  'Get Tachikoma sync status and optionally sync history',
+  TachikomaStatusSchema.shape,
+  async (args) => {
+    const result = handlers.tachikoma_status(args as z.infer<typeof TachikomaStatusSchema>);
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  'tachikoma_export',
+  'Export memories as delta for parallelization with other Tachikoma instances',
+  TachikomaExportSchema.shape,
+  async (args) => {
+    const result = handlers.tachikoma_export(args as z.infer<typeof TachikomaExportSchema>);
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  'tachikoma_import',
+  'Import and merge memories from another Tachikoma instance',
+  TachikomaImportSchema.shape,
+  async (args) => {
+    const result = handlers.tachikoma_import(args as z.infer<typeof TachikomaImportSchema>);
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  'tachikoma_conflicts',
+  'List pending conflicts from memory merges',
+  TachikomaConflictsSchema.shape,
+  async (args) => {
+    const result = handlers.tachikoma_conflicts(args as z.infer<typeof TachikomaConflictsSchema>);
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  'tachikoma_resolve_conflict',
+  'Resolve a merge conflict manually',
+  TachikomaResolveConflictSchema.shape,
+  async (args) => {
+    const result = handlers.tachikoma_resolve_conflict(args as z.infer<typeof TachikomaResolveConflictSchema>);
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+// Agent Management Tools
+server.tool(
+  'agent_register',
+  'Register a new agent with role and specializations',
+  AgentRegisterSchema.shape,
+  async (args) => {
+    const result = handlers.agent_register(args as z.infer<typeof AgentRegisterSchema>);
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  'agent_get',
+  'Get agent profile by ID',
+  AgentGetSchema.shape,
+  async (args) => {
+    const result = handlers.agent_get(args as z.infer<typeof AgentGetSchema>);
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  'agent_list',
+  'List agents with optional role and activity filters',
+  AgentListSchema.shape,
+  async (args) => {
+    const result = handlers.agent_list(args as z.infer<typeof AgentListSchema>);
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+// Pattern Tools
+server.tool(
+  'pattern_create',
+  'Create a new pattern from episodic observations',
+  PatternCreateSchema.shape,
+  async (args) => {
+    const result = handlers.pattern_create(args as z.infer<typeof PatternCreateSchema>);
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  'pattern_get',
+  'Get a pattern by ID',
+  PatternGetSchema.shape,
+  async (args) => {
+    const result = handlers.pattern_get(args as z.infer<typeof PatternGetSchema>);
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  'pattern_list',
+  'List patterns with optional filters',
+  PatternListSchema.shape,
+  async (args) => {
+    const result = handlers.pattern_list(args as z.infer<typeof PatternListSchema>);
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  'pattern_confirm',
+  'Confirm or reject a pattern',
+  PatternConfirmSchema.shape,
+  async (args) => {
+    const result = handlers.pattern_confirm(args as z.infer<typeof PatternConfirmSchema>);
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+// Insight Tools
+server.tool(
+  'insight_create',
+  'Create an insight from patterns',
+  InsightCreateSchema.shape,
+  async (args) => {
+    const result = handlers.insight_create(args as z.infer<typeof InsightCreateSchema>);
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  'insight_get',
+  'Get an insight by ID',
+  InsightGetSchema.shape,
+  async (args) => {
+    const result = handlers.insight_get(args as z.infer<typeof InsightGetSchema>);
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  'insight_list',
+  'List insights with optional filters',
+  InsightListSchema.shape,
+  async (args) => {
+    const result = handlers.insight_list(args as z.infer<typeof InsightListSchema>);
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  'insight_validate',
+  'Validate or reject an insight',
+  InsightValidateSchema.shape,
+  async (args) => {
+    const result = handlers.insight_validate(args as z.infer<typeof InsightValidateSchema>);
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+// Wisdom Tools
+server.tool(
+  'wisdom_create',
+  'Create wisdom from insights and patterns (DIKW Level 4)',
+  WisdomCreateSchema.shape,
+  async (args) => {
+    const result = handlers.wisdom_create(args as z.infer<typeof WisdomCreateSchema>);
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  'wisdom_get',
+  'Get wisdom by ID or name',
+  WisdomGetSchema.shape,
+  async (args) => {
+    const result = handlers.wisdom_get(args as z.infer<typeof WisdomGetSchema>);
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  'wisdom_search',
+  'Search wisdom by query and domains',
+  WisdomSearchSchema.shape,
+  async (args) => {
+    const result = handlers.wisdom_search(args as z.infer<typeof WisdomSearchSchema>);
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  'wisdom_apply',
+  'Record wisdom application result',
+  WisdomApplySchema.shape,
+  async (args) => {
+    const result = handlers.wisdom_apply(args as z.infer<typeof WisdomApplySchema>);
     return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
   }
 );

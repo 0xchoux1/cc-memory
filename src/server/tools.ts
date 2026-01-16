@@ -4,6 +4,7 @@
 
 import { z } from 'zod';
 import type { MemoryManager } from '../memory/MemoryManager.js';
+import type { SqliteStorage } from '../storage/SqliteStorage.js';
 
 // Schema definitions
 export const WorkingSetSchema = z.object({
@@ -224,8 +225,213 @@ export const MemoryBoostSchema = z.object({
     .describe('Minimum access count to qualify for boost'),
 });
 
+// ============================================================================
+// Tachikoma Parallelization Schemas
+// ============================================================================
+
+export const TachikomaInitSchema = z.object({
+  tachikoma_id: z.string().optional()
+    .describe('Tachikoma ID (auto-generated if omitted)'),
+  tachikoma_name: z.string().optional()
+    .describe('Tachikoma name (e.g., "Tachikoma-Alpha")'),
+});
+
+export const TachikomaStatusSchema = z.object({
+  include_history: z.boolean().optional().default(false)
+    .describe('Include sync history'),
+  history_limit: z.number().optional().default(10)
+    .describe('Number of history entries to return'),
+});
+
+export const TachikomaExportSchema = z.object({
+  since_timestamp: z.number().optional()
+    .describe('Export memories updated after this timestamp (0 for all)'),
+  output_path: z.string().optional()
+    .describe('Optional file path to write export (if omitted, returns data directly)'),
+});
+
+export const TachikomaImportSchema = z.object({
+  data: z.object({
+    version: z.string(),
+    format: z.literal('tachikoma-parallelize-delta'),
+    tachikomaId: z.string(),
+    tachikomaName: z.string().optional(),
+    exportedAt: z.number(),
+    syncVector: z.record(z.number()),
+    delta: z.object({
+      working: z.array(z.unknown()),
+      episodic: z.array(z.unknown()),
+      semantic: z.object({
+        entities: z.array(z.unknown()),
+        relations: z.array(z.unknown()),
+      }),
+    }),
+    deleted: z.object({
+      working: z.array(z.string()),
+      episodic: z.array(z.string()),
+      semantic: z.object({
+        entities: z.array(z.string()),
+        relations: z.array(z.string()),
+      }),
+    }),
+  }).describe('Parallelization export data from another Tachikoma'),
+  strategy: z.enum(['newer_wins', 'higher_importance', 'higher_confidence', 'merge_observations', 'merge_learnings', 'manual']).optional()
+    .describe('Conflict resolution strategy (default: merge_learnings)'),
+  auto_resolve: z.boolean().optional().default(true)
+    .describe('Automatically resolve conflicts'),
+});
+
+export const TachikomaConflictsSchema = z.object({
+  unresolved_only: z.boolean().optional().default(true)
+    .describe('Only show unresolved conflicts'),
+});
+
+export const TachikomaResolveConflictSchema = z.object({
+  conflict_id: z.string().describe('Conflict ID to resolve'),
+  resolution: z.enum(['local', 'remote', 'merged'])
+    .describe('Resolution choice'),
+});
+
+// ============================================================================
+// Agent Management Schemas
+// ============================================================================
+
+export const AgentRegisterSchema = z.object({
+  name: z.string().describe('Agent name'),
+  role: z.enum(['frontend', 'backend', 'security', 'testing', 'devops', 'architecture', 'data', 'general'])
+    .describe('Agent role'),
+  specializations: z.array(z.string()).optional()
+    .describe('Detailed specializations'),
+  capabilities: z.array(z.string()).optional()
+    .describe('Executable tasks'),
+  knowledge_domains: z.array(z.string()).optional()
+    .describe('Knowledge domains'),
+});
+
+export const AgentGetSchema = z.object({
+  id: z.string().describe('Agent ID'),
+});
+
+export const AgentListSchema = z.object({
+  role: z.enum(['frontend', 'backend', 'security', 'testing', 'devops', 'architecture', 'data', 'general']).optional()
+    .describe('Filter by role'),
+  active_within_hours: z.number().optional().default(24)
+    .describe('Filter agents active within this many hours'),
+});
+
+// ============================================================================
+// Pattern Schemas
+// ============================================================================
+
+export const PatternCreateSchema = z.object({
+  pattern: z.string().describe('Pattern description'),
+  supporting_episodes: z.array(z.string()).optional()
+    .describe('Episode IDs that support this pattern'),
+  related_tags: z.array(z.string()).optional()
+    .describe('Related tags'),
+  confidence: z.number().min(0).max(1).optional()
+    .describe('Confidence score (0-1)'),
+});
+
+export const PatternGetSchema = z.object({
+  id: z.string().describe('Pattern ID'),
+});
+
+export const PatternListSchema = z.object({
+  query: z.string().optional().describe('Search query'),
+  status: z.enum(['candidate', 'confirmed', 'rejected']).optional()
+    .describe('Filter by status'),
+  min_confidence: z.number().min(0).max(1).optional()
+    .describe('Minimum confidence'),
+  min_frequency: z.number().optional()
+    .describe('Minimum frequency'),
+  limit: z.number().optional().default(10),
+});
+
+export const PatternConfirmSchema = z.object({
+  id: z.string().describe('Pattern ID'),
+  confirmed: z.boolean().describe('Confirmation result'),
+});
+
+// ============================================================================
+// Insight Schemas
+// ============================================================================
+
+export const InsightCreateSchema = z.object({
+  insight: z.string().describe('Insight content'),
+  reasoning: z.string().optional().describe('Derivation reasoning'),
+  source_patterns: z.array(z.string()).optional()
+    .describe('Source pattern IDs'),
+  domains: z.array(z.string()).optional()
+    .describe('Applicable domains'),
+  confidence: z.number().min(0).max(1).optional()
+    .describe('Confidence score'),
+});
+
+export const InsightGetSchema = z.object({
+  id: z.string().describe('Insight ID'),
+});
+
+export const InsightListSchema = z.object({
+  query: z.string().optional().describe('Search query'),
+  status: z.enum(['candidate', 'validated', 'rejected']).optional()
+    .describe('Filter by status'),
+  min_confidence: z.number().min(0).max(1).optional()
+    .describe('Minimum confidence'),
+  limit: z.number().optional().default(10),
+});
+
+export const InsightValidateSchema = z.object({
+  id: z.string().describe('Insight ID'),
+  validated: z.boolean().describe('Validation result'),
+});
+
+// ============================================================================
+// Wisdom Schemas
+// ============================================================================
+
+export const WisdomCreateSchema = z.object({
+  name: z.string().describe('Wisdom name (unique)'),
+  principle: z.string().describe('Core principle in one sentence'),
+  description: z.string().describe('Detailed description'),
+  derived_from_insights: z.array(z.string()).optional()
+    .describe('Source insight IDs'),
+  derived_from_patterns: z.array(z.string()).optional()
+    .describe('Source pattern IDs'),
+  evidence_episodes: z.array(z.string()).optional()
+    .describe('Evidence episode IDs'),
+  applicable_domains: z.array(z.string()).optional()
+    .describe('Applicable domains'),
+  applicable_contexts: z.array(z.string()).optional()
+    .describe('Applicable contexts'),
+  limitations: z.array(z.string()).optional()
+    .describe('Limitations'),
+  tags: z.array(z.string()).optional(),
+});
+
+export const WisdomGetSchema = z.object({
+  identifier: z.string().describe('Wisdom ID or name'),
+});
+
+export const WisdomSearchSchema = z.object({
+  query: z.string().optional().describe('Search query'),
+  domains: z.array(z.string()).optional()
+    .describe('Filter by domains'),
+  min_confidence: z.number().min(0).max(1).optional()
+    .describe('Minimum confidence'),
+  limit: z.number().optional().default(10),
+});
+
+export const WisdomApplySchema = z.object({
+  wisdom_id: z.string().describe('Wisdom ID'),
+  context: z.string().describe('Application context'),
+  result: z.enum(['success', 'failure', 'partial'])
+    .describe('Application result'),
+  feedback: z.string().optional().describe('Feedback'),
+});
+
 // Tool handler factory
-export function createToolHandlers(memoryManager: MemoryManager) {
+export function createToolHandlers(memoryManager: MemoryManager, storage: SqliteStorage) {
   return {
     // Working Memory Tools
     working_set: (args: z.infer<typeof WorkingSetSchema>) => {
@@ -486,6 +692,232 @@ export function createToolHandlers(memoryManager: MemoryManager) {
       });
       return { success: true, ...result };
     },
+
+    // ============================================================================
+    // Tachikoma Parallelization Tools
+    // ============================================================================
+
+    tachikoma_init: (args: z.infer<typeof TachikomaInitSchema>) => {
+      const profile = storage.initTachikoma(args.tachikoma_id, args.tachikoma_name);
+      return { success: true, profile };
+    },
+
+    tachikoma_status: (args: z.infer<typeof TachikomaStatusSchema>) => {
+      const profile = storage.getTachikomaProfile();
+      if (!profile) {
+        return { success: false, error: 'Tachikoma not initialized. Run tachikoma_init first.' };
+      }
+
+      const result: {
+        success: boolean;
+        tachikomaId: string;
+        tachikomaName?: string;
+        syncSeq: number;
+        syncVector: Record<string, number>;
+        lastSyncAt?: number;
+        pendingConflicts: number;
+        history?: unknown[];
+      } = {
+        success: true,
+        tachikomaId: profile.id,
+        tachikomaName: profile.name,
+        syncSeq: profile.syncSeq,
+        syncVector: profile.syncVector,
+        lastSyncAt: profile.lastSyncAt,
+        pendingConflicts: storage.listConflicts(true).length,
+      };
+
+      if (args.include_history) {
+        result.history = storage.listSyncHistory(args.history_limit);
+      }
+
+      return result;
+    },
+
+    tachikoma_export: (args: z.infer<typeof TachikomaExportSchema>) => {
+      try {
+        const exportData = storage.exportDelta(args.since_timestamp);
+        return {
+          success: true,
+          data: exportData,
+          itemCount: {
+            working: exportData.delta.working.length,
+            episodic: exportData.delta.episodic.length,
+            semantic: {
+              entities: exportData.delta.semantic.entities.length,
+              relations: exportData.delta.semantic.relations.length,
+            },
+          },
+        };
+      } catch (error) {
+        return { success: false, error: (error as Error).message };
+      }
+    },
+
+    tachikoma_import: (args: z.infer<typeof TachikomaImportSchema>) => {
+      try {
+        const result = storage.importDelta(args.data as any, {
+          strategy: args.strategy as any,
+          autoResolve: args.auto_resolve,
+        });
+        return result;
+      } catch (error) {
+        return { success: false, error: (error as Error).message };
+      }
+    },
+
+    tachikoma_conflicts: (args: z.infer<typeof TachikomaConflictsSchema>) => {
+      const conflicts = storage.listConflicts(args.unresolved_only);
+      return { success: true, conflicts, count: conflicts.length };
+    },
+
+    tachikoma_resolve_conflict: (args: z.infer<typeof TachikomaResolveConflictSchema>) => {
+      storage.resolveConflict(args.conflict_id, args.resolution);
+      return { success: true };
+    },
+
+    // ============================================================================
+    // Agent Management Tools
+    // ============================================================================
+
+    agent_register: (args: z.infer<typeof AgentRegisterSchema>) => {
+      const agent = storage.createAgent({
+        name: args.name,
+        role: args.role,
+        specializations: args.specializations,
+        capabilities: args.capabilities,
+        knowledgeDomains: args.knowledge_domains,
+      });
+      return { success: true, agent };
+    },
+
+    agent_get: (args: z.infer<typeof AgentGetSchema>) => {
+      const agent = storage.getAgent(args.id);
+      return agent ? { success: true, agent } : { success: false, error: 'Agent not found' };
+    },
+
+    agent_list: (args: z.infer<typeof AgentListSchema>) => {
+      const agents = storage.listAgents({
+        role: args.role,
+        activeWithinMs: args.active_within_hours ? args.active_within_hours * 60 * 60 * 1000 : undefined,
+      });
+      return { success: true, agents, count: agents.length };
+    },
+
+    // ============================================================================
+    // Pattern Tools
+    // ============================================================================
+
+    pattern_create: (args: z.infer<typeof PatternCreateSchema>) => {
+      const pattern = storage.createPattern({
+        pattern: args.pattern,
+        supportingEpisodes: args.supporting_episodes,
+        relatedTags: args.related_tags,
+        confidence: args.confidence,
+      });
+      return { success: true, pattern };
+    },
+
+    pattern_get: (args: z.infer<typeof PatternGetSchema>) => {
+      const pattern = storage.getPattern(args.id);
+      return pattern ? { success: true, pattern } : { success: false, error: 'Pattern not found' };
+    },
+
+    pattern_list: (args: z.infer<typeof PatternListSchema>) => {
+      const patterns = storage.listPatterns({
+        query: args.query,
+        status: args.status,
+        minConfidence: args.min_confidence,
+        minFrequency: args.min_frequency,
+        limit: args.limit,
+      });
+      return { success: true, patterns, count: patterns.length };
+    },
+
+    pattern_confirm: (args: z.infer<typeof PatternConfirmSchema>) => {
+      storage.updatePatternStatus(args.id, args.confirmed ? 'confirmed' : 'rejected');
+      return { success: true };
+    },
+
+    // ============================================================================
+    // Insight Tools
+    // ============================================================================
+
+    insight_create: (args: z.infer<typeof InsightCreateSchema>) => {
+      const insight = storage.createInsight({
+        insight: args.insight,
+        reasoning: args.reasoning,
+        sourcePatterns: args.source_patterns,
+        domains: args.domains,
+        confidence: args.confidence,
+      });
+      return { success: true, insight };
+    },
+
+    insight_get: (args: z.infer<typeof InsightGetSchema>) => {
+      const insight = storage.getInsight(args.id);
+      return insight ? { success: true, insight } : { success: false, error: 'Insight not found' };
+    },
+
+    insight_list: (args: z.infer<typeof InsightListSchema>) => {
+      const insights = storage.listInsights({
+        query: args.query,
+        status: args.status,
+        minConfidence: args.min_confidence,
+        limit: args.limit,
+      });
+      return { success: true, insights, count: insights.length };
+    },
+
+    insight_validate: (args: z.infer<typeof InsightValidateSchema>) => {
+      storage.updateInsightStatus(args.id, args.validated ? 'validated' : 'rejected');
+      return { success: true };
+    },
+
+    // ============================================================================
+    // Wisdom Tools
+    // ============================================================================
+
+    wisdom_create: (args: z.infer<typeof WisdomCreateSchema>) => {
+      const wisdom = storage.createWisdom({
+        name: args.name,
+        principle: args.principle,
+        description: args.description,
+        derivedFromInsights: args.derived_from_insights,
+        derivedFromPatterns: args.derived_from_patterns,
+        evidenceEpisodes: args.evidence_episodes,
+        applicableDomains: args.applicable_domains,
+        applicableContexts: args.applicable_contexts,
+        limitations: args.limitations,
+        tags: args.tags,
+      });
+      return { success: true, wisdom };
+    },
+
+    wisdom_get: (args: z.infer<typeof WisdomGetSchema>) => {
+      const wisdom = storage.getWisdom(args.identifier);
+      return wisdom ? { success: true, wisdom } : { success: false, error: 'Wisdom not found' };
+    },
+
+    wisdom_search: (args: z.infer<typeof WisdomSearchSchema>) => {
+      const wisdom = storage.listWisdom({
+        query: args.query,
+        domains: args.domains,
+        minConfidence: args.min_confidence,
+        limit: args.limit,
+      });
+      return { success: true, wisdom, count: wisdom.length };
+    },
+
+    wisdom_apply: (args: z.infer<typeof WisdomApplySchema>) => {
+      const application = storage.recordWisdomApplication({
+        wisdomId: args.wisdom_id,
+        context: args.context,
+        result: args.result,
+        feedback: args.feedback,
+      });
+      return { success: true, application };
+    },
   };
 }
 
@@ -585,5 +1017,115 @@ export const toolDefinitions = [
     name: 'memory_stats',
     description: 'Get memory usage statistics',
     inputSchema: z.object({}),
+  },
+  // Tachikoma Parallelization Tools
+  {
+    name: 'tachikoma_init',
+    description: 'Initialize Tachikoma parallelization (set individual ID and name)',
+    inputSchema: TachikomaInitSchema,
+  },
+  {
+    name: 'tachikoma_status',
+    description: 'Get Tachikoma sync status and optionally sync history',
+    inputSchema: TachikomaStatusSchema,
+  },
+  {
+    name: 'tachikoma_export',
+    description: 'Export memories as delta for parallelization with other Tachikoma instances',
+    inputSchema: TachikomaExportSchema,
+  },
+  {
+    name: 'tachikoma_import',
+    description: 'Import and merge memories from another Tachikoma instance',
+    inputSchema: TachikomaImportSchema,
+  },
+  {
+    name: 'tachikoma_conflicts',
+    description: 'List pending conflicts from memory merges',
+    inputSchema: TachikomaConflictsSchema,
+  },
+  {
+    name: 'tachikoma_resolve_conflict',
+    description: 'Resolve a merge conflict manually',
+    inputSchema: TachikomaResolveConflictSchema,
+  },
+  // Agent Management Tools
+  {
+    name: 'agent_register',
+    description: 'Register a new agent with role and specializations',
+    inputSchema: AgentRegisterSchema,
+  },
+  {
+    name: 'agent_get',
+    description: 'Get agent profile by ID',
+    inputSchema: AgentGetSchema,
+  },
+  {
+    name: 'agent_list',
+    description: 'List agents with optional role and activity filters',
+    inputSchema: AgentListSchema,
+  },
+  // Pattern Tools
+  {
+    name: 'pattern_create',
+    description: 'Create a new pattern from episodic observations',
+    inputSchema: PatternCreateSchema,
+  },
+  {
+    name: 'pattern_get',
+    description: 'Get a pattern by ID',
+    inputSchema: PatternGetSchema,
+  },
+  {
+    name: 'pattern_list',
+    description: 'List patterns with optional filters',
+    inputSchema: PatternListSchema,
+  },
+  {
+    name: 'pattern_confirm',
+    description: 'Confirm or reject a pattern',
+    inputSchema: PatternConfirmSchema,
+  },
+  // Insight Tools
+  {
+    name: 'insight_create',
+    description: 'Create an insight from patterns',
+    inputSchema: InsightCreateSchema,
+  },
+  {
+    name: 'insight_get',
+    description: 'Get an insight by ID',
+    inputSchema: InsightGetSchema,
+  },
+  {
+    name: 'insight_list',
+    description: 'List insights with optional filters',
+    inputSchema: InsightListSchema,
+  },
+  {
+    name: 'insight_validate',
+    description: 'Validate or reject an insight',
+    inputSchema: InsightValidateSchema,
+  },
+  // Wisdom Tools
+  {
+    name: 'wisdom_create',
+    description: 'Create wisdom from insights and patterns (DIKW Level 4)',
+    inputSchema: WisdomCreateSchema,
+  },
+  {
+    name: 'wisdom_get',
+    description: 'Get wisdom by ID or name',
+    inputSchema: WisdomGetSchema,
+  },
+  {
+    name: 'wisdom_search',
+    description: 'Search wisdom by query and domains',
+    inputSchema: WisdomSearchSchema,
+  },
+  {
+    name: 'wisdom_apply',
+    description: 'Record wisdom application result',
+    inputSchema: WisdomApplySchema,
   },
 ];

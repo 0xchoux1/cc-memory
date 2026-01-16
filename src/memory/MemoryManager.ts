@@ -56,6 +56,14 @@ export class MemoryManager {
   }
 
   /**
+   * Get the underlying storage instance for direct access to extended features
+   * (Tachikoma, Agents, Patterns, Insights, Wisdom)
+   */
+  getStorage(): SqliteStorage {
+    return this.storage;
+  }
+
+  /**
    * Start automatic cleanup of expired working memory
    */
   private startCleanup(interval: number): void {

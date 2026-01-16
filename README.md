@@ -20,6 +20,9 @@ CC-Memory provides a three-layer memory architecture inspired by human cognitive
 - TTL-based automatic expiration
 - Knowledge graph with entity relations
 - **Built-in server instructions** - Claude automatically learns how to use cc-memory
+- **Tachikoma Parallelization** - Sync memories between multiple Claude instances (inspired by Ghost in the Shell)
+- **DIKW Wisdom Hierarchy** - Transform experiences into patterns, insights, and wisdom
+- **Multi-Agent Collaboration** - Track which agent learned what
 
 ## Installation
 
@@ -277,6 +280,160 @@ memory_boost({
 });
 ```
 
+### Tachikoma Parallelization
+
+Sync memories between multiple Claude instances, inspired by the Tachikoma from Ghost in the Shell.
+
+```typescript
+// Initialize this instance with a unique ID
+tachikoma_init({
+  id: "tachi-alpha",        // Optional: auto-generated if not provided
+  name: "Tachikoma Alpha"   // Optional: human-readable name
+});
+
+// Check sync status
+tachikoma_status();
+
+// Export memories for sharing with other instances
+tachikoma_export({
+  since_timestamp: 1234567890  // Optional: only export changes since this time
+});
+
+// Import memories from another instance
+tachikoma_import({
+  data: exportedData,
+  strategy: "merge_learnings",  // newer_wins, merge_learnings, merge_observations, manual
+  auto_resolve: true
+});
+
+// View and resolve conflicts
+tachikoma_conflicts({ unresolved_only: true });
+tachikoma_resolve_conflict({
+  conflict_id: "conflict-123",
+  resolution: "local"  // local, remote, merge
+});
+```
+
+**Conflict Resolution Strategies:**
+- `newer_wins`: Use the more recently updated version
+- `merge_learnings`: Merge learnings from both versions (for episodic memory)
+- `merge_observations`: Merge observations from both versions (for semantic memory)
+- `higher_importance`: Keep the version with higher importance
+- `higher_confidence`: Keep the version with higher confidence
+- `manual`: Create a conflict record for manual resolution
+
+### DIKW Wisdom Hierarchy
+
+Transform raw experiences into reusable knowledge through the Data → Information → Knowledge → Wisdom hierarchy.
+
+```
+Level 1: Raw Experience (Episodic Memory)
+    ↓
+Level 2: Patterns (Repeated observations)
+    ↓
+Level 3: Insights (Cross-domain understanding)
+    ↓
+Level 4: Wisdom (Universal principles)
+```
+
+#### Patterns (Level 2)
+
+```typescript
+// Create a pattern from observations
+pattern_create({
+  pattern: "Large API responses slow down UI rendering",
+  supporting_episodes: ["ep-123", "ep-456"],
+  related_tags: ["API", "performance"],
+  confidence: 0.8
+});
+
+// Confirm a pattern after validation
+pattern_confirm({
+  pattern_id: "pattern-123",
+  status: "confirmed"  // candidate, confirmed, rejected
+});
+
+// List patterns
+pattern_list({
+  status: "confirmed",
+  min_confidence: 0.7,
+  query: "API"
+});
+```
+
+#### Insights (Level 3)
+
+```typescript
+// Generate insight from multiple patterns
+insight_create({
+  insight: "Unbounded data fetching causes issues on both frontend and backend",
+  reasoning: "Pattern analysis shows correlation between large responses and failures",
+  source_patterns: ["pattern-123", "pattern-456"],
+  domains: ["API", "Performance", "UX"],
+  confidence: 0.85
+});
+
+// Validate an insight
+insight_validate({
+  insight_id: "insight-123",
+  status: "validated",  // candidate, validated, rejected
+  validator: "architecture-agent"
+});
+```
+
+#### Wisdom (Level 4)
+
+```typescript
+// Sublimate insights into wisdom
+wisdom_create({
+  name: "API Default Limits Principle",
+  principle: "All collection APIs must have default pagination and limits",
+  description: "Unbounded data fetching causes cascading failures across the stack",
+  derived_from_insights: ["insight-123"],
+  derived_from_patterns: ["pattern-123", "pattern-456"],
+  applicable_domains: ["API Design", "REST", "GraphQL"],
+  applicable_contexts: ["New API development", "API review"],
+  limitations: ["Internal batch processing may need exceptions"],
+  tags: ["API", "performance", "best-practice"]
+});
+
+// Search for applicable wisdom
+wisdom_search({
+  query: "API design",
+  domains: ["REST"],
+  min_confidence: 0.7
+});
+
+// Record wisdom application result
+wisdom_apply({
+  wisdom_id: "wisdom-123",
+  context: "Designing new user list API",
+  result: "success",  // success, failure, partial
+  feedback: "Implemented pagination, prevented performance issues"
+});
+```
+
+### Multi-Agent Collaboration
+
+Track which agent (or persona) learned what, enabling specialized knowledge domains.
+
+```typescript
+// Register an agent
+agent_register({
+  name: "Frontend Specialist",
+  role: "frontend",  // frontend, backend, security, testing, devops, architecture, data, general
+  specializations: ["React", "TypeScript", "CSS"],
+  capabilities: ["UI development", "Performance optimization"],
+  knowledge_domains: ["Web Development", "UX"]
+});
+
+// Get agent info
+agent_get({ id: "agent-123" });
+
+// List agents by role
+agent_list({ role: "frontend" });
+```
+
 ## MCP Resources
 
 Access memory data through MCP resources:
@@ -361,21 +518,34 @@ cc-memory/
 ├── src/
 │   ├── index.ts              # MCP server entry point
 │   ├── memory/
-│   │   ├── types.ts          # Type definitions
+│   │   ├── types.ts          # Type definitions (including DIKW & Tachikoma types)
 │   │   ├── WorkingMemory.ts  # Working memory layer
 │   │   ├── EpisodicMemory.ts # Episodic memory layer
 │   │   ├── SemanticMemory.ts # Semantic memory layer
 │   │   └── MemoryManager.ts  # Cross-layer orchestration
 │   ├── server/
-│   │   └── tools.ts          # MCP tool definitions
+│   │   └── tools.ts          # MCP tool definitions (40+ tools)
 │   └── storage/
-│       └── SqliteStorage.ts  # SQLite persistence
+│       └── SqliteStorage.ts  # SQLite persistence (including DIKW & Tachikoma tables)
 ├── tests/
-│   └── memory/               # Unit tests
+│   ├── memory/               # Core memory unit tests
+│   └── storage/              # DIKW & Tachikoma unit tests
+├── scripts/
+│   └── test-new-features.ts  # Functional test script
 ├── examples/
 │   └── claude-code-config.json
 └── dist/                     # Build output
 ```
+
+### Database Schema
+
+The SQLite database includes tables for:
+- **Working Memory**: `working_memory`
+- **Episodic Memory**: `episodic_memory`
+- **Semantic Memory**: `semantic_entities`, `semantic_relations`
+- **Agents**: `agents`
+- **DIKW Hierarchy**: `patterns`, `insights`, `wisdom`, `wisdom_applications`
+- **Tachikoma Sync**: `parallelization_meta`, `sync_history`, `conflicts`
 
 ## License
 
