@@ -64,6 +64,13 @@ export class MemoryManager {
   }
 
   /**
+   * Wait for storage initialization to complete
+   */
+  async ready(): Promise<void> {
+    await this.storage.ready();
+  }
+
+  /**
    * Start automatic cleanup of expired working memory
    */
   private startCleanup(interval: number): void {

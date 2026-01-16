@@ -90,6 +90,13 @@ export class SqliteStorage {
     }
   }
 
+  /**
+   * Wait for storage initialization to complete
+   */
+  async ready(): Promise<void> {
+    await this.ensureInitialized();
+  }
+
   private createTables(): void {
     if (!this.db) return;
 

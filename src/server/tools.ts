@@ -3,6 +3,7 @@
  */
 
 import { z } from 'zod';
+import * as fs from 'fs';
 import type { MemoryManager } from '../memory/MemoryManager.js';
 import type { SqliteStorage } from '../storage/SqliteStorage.js';
 
@@ -737,6 +738,12 @@ export function createToolHandlers(memoryManager: MemoryManager, storage: Sqlite
     tachikoma_export: (args: z.infer<typeof TachikomaExportSchema>) => {
       try {
         const exportData = storage.exportDelta(args.since_timestamp);
+
+        // If output_path is specified, write to file
+        if (args.output_path) {
+          fs.writeFileSync(args.output_path, JSON.stringify(exportData, null, 2), 'utf-8');
+        }
+
         return {
           success: true,
           data: exportData,

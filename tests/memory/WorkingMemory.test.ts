@@ -17,8 +17,8 @@ describe('WorkingMemory', () => {
       dataPath: testDataPath,
       sessionId: 'test-session-001',
     });
-    // Wait for async initialization
-    await new Promise(resolve => setTimeout(resolve, 100));
+    // Wait for storage initialization
+    await manager.ready();
   });
 
   afterEach(() => {
