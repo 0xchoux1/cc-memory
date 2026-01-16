@@ -1358,10 +1358,14 @@ export class SqliteStorage {
     const now = Date.now();
     const tachikomaId = id || `tachi_${now}_${Math.random().toString(36).substr(2, 9)}`;
 
-    // Check if already exists
-    const existing = this.getTachikomaProfile();
-    if (existing) {
-      return existing;
+    // Check if profile with this name already exists
+    if (name) {
+      const existingByName = this.getTachikomaProfileByName(name);
+      if (existingByName) {
+        // Set as current active profile
+        this.setActiveTachikoma(existingByName.id);
+        return existingByName;
+      }
     }
 
     const profile: TachikomaProfile = {
@@ -1384,13 +1388,66 @@ export class SqliteStorage {
       profile.createdAt,
     ]);
 
+    // Set as current active profile
+    this.setActiveTachikoma(tachikomaId);
+
     this.save();
     return profile;
+  }
+
+  /**
+   * Get Tachikoma profile by name
+   */
+  getTachikomaProfileByName(name: string): TachikomaProfile | null {
+    if (!this.db) return null;
+
+    const result = this.db.exec('SELECT * FROM parallelization_meta WHERE tachikoma_name = ?', [name]);
+    if (result.length === 0 || result[0].values.length === 0) return null;
+
+    const row = this.arrayToObject(result[0].columns, result[0].values[0]);
+    return {
+      id: row.tachikoma_id as TachikomaId,
+      name: row.tachikoma_name as string | undefined,
+      syncSeq: row.sync_seq as number,
+      syncVector: JSON.parse(row.sync_vector as string),
+      lastSyncAt: row.last_sync_at as number | undefined,
+      createdAt: row.created_at as number,
+    };
+  }
+
+  /**
+   * Set the active Tachikoma ID for the current session
+   */
+  private activeTachikomaId: TachikomaId | null = null;
+
+  setActiveTachikoma(tachikomaId: TachikomaId): void {
+    this.activeTachikomaId = tachikomaId;
+  }
+
+  getActiveTachikomaId(): TachikomaId | null {
+    return this.activeTachikomaId;
   }
 
   getTachikomaProfile(): TachikomaProfile | null {
     if (!this.db) return null;
 
+    // If there's an active Tachikoma set, return that profile
+    if (this.activeTachikomaId) {
+      const result = this.db.exec('SELECT * FROM parallelization_meta WHERE tachikoma_id = ?', [this.activeTachikomaId]);
+      if (result.length > 0 && result[0].values.length > 0) {
+        const row = this.arrayToObject(result[0].columns, result[0].values[0]);
+        return {
+          id: row.tachikoma_id as TachikomaId,
+          name: row.tachikoma_name as string | undefined,
+          syncSeq: row.sync_seq as number,
+          syncVector: JSON.parse(row.sync_vector as string),
+          lastSyncAt: row.last_sync_at as number | undefined,
+          createdAt: row.created_at as number,
+        };
+      }
+    }
+
+    // Fallback: return the first profile (for backward compatibility)
     const result = this.db.exec('SELECT * FROM parallelization_meta LIMIT 1');
     if (result.length === 0 || result[0].values.length === 0) return null;
 

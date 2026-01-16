@@ -64,6 +64,7 @@ import { SqliteStorage } from './storage/SqliteStorage.js';
 // Configuration from environment
 const DATA_PATH = process.env.MEMORY_DATA_PATH || join(homedir(), '.claude-memory');
 const CLEANUP_INTERVAL = parseInt(process.env.MEMORY_CLEANUP_INTERVAL || '300000', 10); // 5 minutes
+const TACHIKOMA_NAME = process.env.CC_MEMORY_TACHIKOMA_NAME;
 
 // Initialize memory manager
 const memoryManager = new MemoryManager({
@@ -74,6 +75,15 @@ const memoryManager = new MemoryManager({
 // Create tool handlers
 const storage = memoryManager.getStorage();
 const handlers = createToolHandlers(memoryManager, storage);
+
+// Auto-initialize Tachikoma if name is specified via environment variable
+async function initializeTachikoma(): Promise<void> {
+  if (TACHIKOMA_NAME) {
+    await storage.ready();
+    const profile = storage.initTachikoma(undefined, TACHIKOMA_NAME);
+    console.error(`Tachikoma initialized: ${profile.name} (${profile.id})`);
+  }
+}
 
 // Server instructions for Claude
 const SERVER_INSTRUCTIONS = `
@@ -717,6 +727,9 @@ process.on('SIGTERM', () => {
 
 // Start server
 async function main() {
+  // Initialize Tachikoma if configured
+  await initializeTachikoma();
+
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error('CC-Memory MCP server started');

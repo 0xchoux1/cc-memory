@@ -45,12 +45,24 @@ describe('Tachikoma Parallelization', () => {
       expect(profile.syncSeq).toBe(0);
     });
 
-    it('should return existing profile if already initialized', () => {
+    it('should return existing profile if same name is used', () => {
       const profile1 = storage.initTachikoma('test-id', 'Test');
-      const profile2 = storage.initTachikoma('different-id', 'Different');
+      const profile2 = storage.initTachikoma('different-id', 'Test'); // Same name
 
-      // Should return the first one
+      // Should return the existing one with the same name
       expect(profile2.id).toBe('test-id');
+      expect(profile2.name).toBe('Test');
+    });
+
+    it('should create different profiles for different names', () => {
+      const profile1 = storage.initTachikoma('test-id', 'Alpha');
+      const profile2 = storage.initTachikoma('different-id', 'Beta');
+
+      // Should create separate profiles
+      expect(profile1.id).toBe('test-id');
+      expect(profile1.name).toBe('Alpha');
+      expect(profile2.id).toBe('different-id');
+      expect(profile2.name).toBe('Beta');
     });
   });
 
