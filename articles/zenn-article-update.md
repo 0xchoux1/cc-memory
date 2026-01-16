@@ -9,8 +9,9 @@ published: false
 ## TL;DR
 
 - cc-memory に **MCP Server Instructions** 機能を追加
-- Claude Code が cc-memory の使い方を**ガイダンスとして受け取る**ように
+- Claude Code が cc-memory の使い方を**ヒントとして受け取る**ように
 - **CLAUDE.md への手動設定が不要**に（MCP サーバー登録は従来通り必要）
+- 結果として、**設定漏れによる"記憶が効かない事故"を減らせる**
 
 ---
 
@@ -40,7 +41,7 @@ published: false
 - 設定を忘れると記憶機能が活用されない
 - バージョンアップ時に CLAUDE.md の更新が必要
 
-### After: CLAUDE.md への記述が不要に
+### After: CLAUDE.md が不要に（instructions へ移管）
 
 MCP の `instructions` 機能を使い、サーバー側から Claude に使い方を伝えるようにしました。
 
@@ -58,13 +59,15 @@ const server = new McpServer({
 
 - **CLAUDE.md 設定不要**: MCP サーバーを登録するだけで OK
 - **常に最新**: サーバー更新で instructions も更新される
-- **一貫性**: どのプロジェクトでも同じ使い方
+- **一貫性**: どのプロジェクトでも同じ運用に揃えやすい
 
 :::message
 **「設定不要」の範囲について**
 
 ここで言う「設定不要」は **CLAUDE.md への手動記述が不要** という意味です。
 MCP サーバー登録自体は従来通り必要です（`~/.claude/settings.json` または `.mcp.json`）。
+
+※ 登録先はユーザー設定かプロジェクト設定かで異なります。詳細は [Claude Code ドキュメント](https://docs.anthropic.com/en/docs/claude-code) を参照してください。
 :::
 
 ---
@@ -73,12 +76,12 @@ MCP サーバー登録自体は従来通り必要です（`~/.claude/settings.js
 
 ### MCP Server Instructions とは
 
-MCP (Model Context Protocol) では、サーバーが `instructions` フィールドを通じてクライアント（Claude）にガイダンスを提供できます。
+MCP (Model Context Protocol) では、サーバーが `instructions` フィールドを通じてクライアント（Claude）にヒントを提供できます。
 
 ```typescript
 const server = new McpServer(
   { name: 'cc-memory', version: '1.1.0' },
-  { instructions: '...' }  // Claude に送られるガイダンス
+  { instructions: '...' }  // Claude に送られるヒント
 );
 ```
 
@@ -95,9 +98,9 @@ cc-memory では以下のような内容を Claude に伝えています：
 ```markdown
 # cc-memory 使用ルール
 
-## セッション開始時（重要）
+## セッション開始時（推奨）
 
-新しいセッションでユーザーの最初のメッセージを受け取ったら、必ず以下を実行すること：
+新しいセッションでユーザーの最初のメッセージを受け取ったら、以下を推奨：
 
 1. memory_recall でユーザーの発言に関連する記憶を検索
 2. semantic_search(type: "preference") でユーザーの好みを確認
@@ -130,7 +133,7 @@ npm install
 npm run build
 ```
 
-Claude Code を再起動すれば、新しい instructions が適用されます。
+Claude Code を再起動（または再接続）すると、新しい instructions が反映されます。
 
 ### 動作確認
 
@@ -148,12 +151,16 @@ instructions が正しく適用されているか確認するには：
 |------|--------|-------|
 | 初期設定 | CLAUDE.md に記述が必要 | **不要**（MCP 登録のみ） |
 | バージョン更新時 | CLAUDE.md の更新が必要 | **不要** |
-| プロジェクト間の一貫性 | 手動で維持 | **自動で保証** |
+| プロジェクト間の一貫性 | 手動で維持 | **揃えやすい**（instructions に集約） |
 
-MCP Server Instructions を活用することで、「MCP サーバーを登録するだけで動く」体験を実現しました。
+MCP Server Instructions を活用することで、「MCP サーバーを登録するだけで導入でき、運用が揃いやすい」体験を実現しました。
 
 :::message
-**セキュリティについて**: MCP サーバーは信頼できるソースからのみ利用してください。`instructions` はサーバーから Claude への指示として機能するため、悪意あるサーバーは不適切な動作を誘導する可能性があります。
+**セキュリティについて**
+
+MCP サーバーは信頼できるソースからのみ利用してください。`instructions` はサーバーから Claude への指示として機能するため、悪意あるサーバーは不適切な動作を誘導する可能性があります。
+
+特に **未知の作者のサーバ** や **権限・データアクセス範囲が不明なサーバ** は避けてください。また、API キー等の秘匿情報は記憶させない運用を推奨します。
 :::
 
 ---
