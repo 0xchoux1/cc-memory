@@ -9,6 +9,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import { homedir } from 'os';
 import { join } from 'path';
+import { existsSync, readdirSync, readFileSync, renameSync } from 'fs';
 
 import { MemoryManager } from './memory/MemoryManager.js';
 import {
@@ -65,6 +66,7 @@ import { SqliteStorage } from './storage/SqliteStorage.js';
 const DATA_PATH = process.env.MEMORY_DATA_PATH || join(homedir(), '.claude-memory');
 const CLEANUP_INTERVAL = parseInt(process.env.MEMORY_CLEANUP_INTERVAL || '300000', 10); // 5 minutes
 const TACHIKOMA_NAME = process.env.CC_MEMORY_TACHIKOMA_NAME;
+const SYNC_DIR = process.env.CC_MEMORY_SYNC_DIR;
 
 // Initialize memory manager
 const memoryManager = new MemoryManager({
@@ -82,6 +84,70 @@ async function initializeTachikoma(): Promise<void> {
     await storage.ready();
     const profile = storage.initTachikoma(undefined, TACHIKOMA_NAME);
     console.error(`Tachikoma initialized: ${profile.name} (${profile.id})`);
+  }
+}
+
+// Auto-sync from sync directory on startup
+async function autoSyncFromDirectory(): Promise<void> {
+  if (!SYNC_DIR) {
+    return;
+  }
+
+  if (!existsSync(SYNC_DIR)) {
+    console.error(`Sync directory does not exist: ${SYNC_DIR}`);
+    return;
+  }
+
+  await storage.ready();
+
+  // Find all .json files (excluding .imported files)
+  const files = readdirSync(SYNC_DIR)
+    .filter(f => f.endsWith('.json') && !f.endsWith('.imported.json'));
+
+  if (files.length === 0) {
+    console.error(`No sync files found in: ${SYNC_DIR}`);
+    return;
+  }
+
+  console.error(`Found ${files.length} sync file(s) in: ${SYNC_DIR}`);
+
+  for (const file of files) {
+    const filePath = join(SYNC_DIR, file);
+    try {
+      const content = readFileSync(filePath, 'utf-8');
+      const data = JSON.parse(content);
+
+      // Validate format
+      if (data.format !== 'tachikoma-parallelize-delta') {
+        console.error(`Skipping ${file}: invalid format`);
+        continue;
+      }
+
+      // Skip if it's from ourselves
+      const currentProfile = storage.getTachikomaProfile();
+      if (currentProfile && data.tachikomaId === currentProfile.id) {
+        console.error(`Skipping ${file}: same Tachikoma ID`);
+        // Rename to .imported anyway to avoid reprocessing
+        renameSync(filePath, filePath.replace('.json', '.imported.json'));
+        continue;
+      }
+
+      // Import the delta
+      const result = storage.importDelta(data, {
+        strategy: 'merge_learnings',
+        autoResolve: true,
+      });
+
+      if (result.success) {
+        console.error(`Imported ${file} from ${data.tachikomaName || data.tachikomaId}: ${result.merged.episodic} episodes, ${result.merged.semantic.entities} entities`);
+        // Rename to .imported to prevent re-import
+        renameSync(filePath, filePath.replace('.json', '.imported.json'));
+      } else {
+        console.error(`Failed to import ${file}: ${(result as any).error || 'unknown error'}`);
+      }
+    } catch (error) {
+      console.error(`Error processing ${file}:`, (error as Error).message);
+    }
   }
 }
 
@@ -729,6 +795,9 @@ process.on('SIGTERM', () => {
 async function main() {
   // Initialize Tachikoma if configured
   await initializeTachikoma();
+
+  // Auto-sync from sync directory
+  await autoSyncFromDirectory();
 
   const transport = new StdioServerTransport();
   await server.connect(transport);

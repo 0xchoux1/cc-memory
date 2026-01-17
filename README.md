@@ -284,6 +284,39 @@ memory_boost({
 
 Sync memories between multiple Claude instances, inspired by the Tachikoma from Ghost in the Shell.
 
+#### Auto-Sync on Startup
+
+Set the `CC_MEMORY_SYNC_DIR` environment variable to automatically import sync files when the server starts:
+
+```json
+{
+  "mcpServers": {
+    "cc-memory": {
+      "command": "node",
+      "args": ["/path/to/cc-memory/dist/index.js"],
+      "env": {
+        "CC_MEMORY_TACHIKOMA_NAME": "Tachikoma-Alpha",
+        "CC_MEMORY_SYNC_DIR": "/shared/tachikoma-sync"
+      }
+    }
+  }
+}
+```
+
+**How it works:**
+1. On startup, the server checks `CC_MEMORY_SYNC_DIR` for `.json` files
+2. Valid Tachikoma export files are automatically imported
+3. After successful import, files are renamed to `.imported.json` to prevent re-import
+4. Files from the same Tachikoma ID are skipped
+
+**Workflow for multi-instance sync:**
+1. Instance A exports: `tachikoma_export({ output_path: "/shared/tachikoma-sync/alpha-export.json" })`
+2. Instance B starts and auto-imports the file
+3. Instance B exports: `tachikoma_export({ output_path: "/shared/tachikoma-sync/beta-export.json" })`
+4. Instance A restarts and auto-imports B's memories
+
+#### Manual Sync
+
 ```typescript
 // Initialize this instance with a unique ID
 tachikoma_init({
@@ -480,6 +513,8 @@ Parameters:
 |----------|---------|-------------|
 | `MEMORY_DATA_PATH` | `~/.claude-memory` | Directory for database storage |
 | `MEMORY_CLEANUP_INTERVAL` | `300000` (5 min) | Interval for expired item cleanup |
+| `CC_MEMORY_TACHIKOMA_NAME` | - | Auto-initialize Tachikoma with this name on startup |
+| `CC_MEMORY_SYNC_DIR` | - | Directory to auto-import sync files on startup |
 
 ## Server Instructions
 
