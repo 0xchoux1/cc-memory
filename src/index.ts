@@ -9,9 +9,9 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import { homedir } from 'os';
 import { join } from 'path';
-import { existsSync, readdirSync, readFileSync, renameSync } from 'fs';
 
 import { MemoryManager } from './memory/MemoryManager.js';
+import { SyncManager, FileSyncAdapter, CloudSyncAdapter } from './sync/index.js';
 import {
   createToolHandlers,
   WorkingSetSchema,
@@ -68,6 +68,9 @@ const DATA_PATH = process.env.MEMORY_DATA_PATH || join(homedir(), '.claude-memor
 const CLEANUP_INTERVAL = parseInt(process.env.MEMORY_CLEANUP_INTERVAL || '300000', 10); // 5 minutes
 const TACHIKOMA_NAME = process.env.CC_MEMORY_TACHIKOMA_NAME;
 const SYNC_DIR = process.env.CC_MEMORY_SYNC_DIR;
+const SYNC_TYPE = process.env.CC_MEMORY_SYNC_TYPE || 'file'; // 'file' or 'cloud'
+const CLOUD_SYNC_DIR = process.env.CC_MEMORY_CLOUD_SYNC_DIR;
+const SYNC_INTERVAL = parseInt(process.env.CC_MEMORY_SYNC_INTERVAL || '0', 10); // Auto-sync interval in seconds (0 = disabled)
 
 // Initialize memory manager
 const memoryManager = new MemoryManager({
@@ -88,67 +91,73 @@ async function initializeTachikoma(): Promise<void> {
   }
 }
 
-// Auto-sync from sync directory on startup
-async function autoSyncFromDirectory(): Promise<void> {
-  if (!SYNC_DIR) {
-    return;
-  }
+// Initialize SyncManager
+let syncManager: SyncManager | undefined;
 
-  if (!existsSync(SYNC_DIR)) {
-    console.error(`Sync directory does not exist: ${SYNC_DIR}`);
+// Auto-sync from sync directory on startup using SyncManager
+async function autoSyncFromDirectory(): Promise<void> {
+  // Determine sync directory (CLOUD_SYNC_DIR takes priority for cloud type)
+  const syncDir = SYNC_TYPE === 'cloud' ? (CLOUD_SYNC_DIR || SYNC_DIR) : SYNC_DIR;
+
+  if (!syncDir) {
     return;
   }
 
   await storage.ready();
 
-  // Find all .json files (excluding .imported files)
-  const files = readdirSync(SYNC_DIR)
-    .filter(f => f.endsWith('.json') && !f.endsWith('.imported.json'));
+  // Create SyncManager
+  syncManager = new SyncManager(storage, {
+    conflictStrategy: 'merge_learnings',
+    autoResolve: true,
+    autoSyncInterval: SYNC_INTERVAL > 0 ? SYNC_INTERVAL * 1000 : 0,
+  });
 
-  if (files.length === 0) {
-    console.error(`No sync files found in: ${SYNC_DIR}`);
-    return;
+  // Get current Tachikoma ID
+  const currentProfile = storage.getTachikomaProfile();
+
+  // Create adapter based on sync type
+  if (SYNC_TYPE === 'cloud') {
+    // CloudSyncAdapter with file watching
+    const cloudAdapter = new CloudSyncAdapter({
+      name: 'cloud',
+      syncDir: syncDir,
+      watchInterval: 5000, // 5 seconds
+    });
+
+    if (currentProfile) {
+      cloudAdapter.setTachikomaId(currentProfile.id);
+    }
+
+    await syncManager.addAdapter('cloud', cloudAdapter);
+    console.error(`Cloud sync initialized with: ${syncDir}`);
+  } else {
+    // FileSyncAdapter (default)
+    const fileSyncAdapter = new FileSyncAdapter({
+      name: 'file',
+      syncDir: syncDir,
+    });
+
+    if (currentProfile) {
+      fileSyncAdapter.setTachikomaId(currentProfile.id);
+    }
+
+    await syncManager.addAdapter('file', fileSyncAdapter);
   }
 
-  console.error(`Found ${files.length} sync file(s) in: ${SYNC_DIR}`);
-
-  for (const file of files) {
-    const filePath = join(SYNC_DIR, file);
-    try {
-      const content = readFileSync(filePath, 'utf-8');
-      const data = JSON.parse(content);
-
-      // Validate format
-      if (data.format !== 'tachikoma-parallelize-delta') {
-        console.error(`Skipping ${file}: invalid format`);
-        continue;
-      }
-
-      // Skip if it's from ourselves
-      const currentProfile = storage.getTachikomaProfile();
-      if (currentProfile && data.tachikomaId === currentProfile.id) {
-        console.error(`Skipping ${file}: same Tachikoma ID`);
-        // Rename to .imported anyway to avoid reprocessing
-        renameSync(filePath, filePath.replace('.json', '.imported.json'));
-        continue;
-      }
-
-      // Import the delta
-      const result = storage.importDelta(data, {
-        strategy: 'merge_learnings',
-        autoResolve: true,
-      });
-
-      if (result.success) {
-        console.error(`Imported ${file} from ${data.tachikomaName || data.tachikomaId}: ${result.merged.episodic} episodes, ${result.merged.semantic.entities} entities`);
-        // Rename to .imported to prevent re-import
-        renameSync(filePath, filePath.replace('.json', '.imported.json'));
-      } else {
-        console.error(`Failed to import ${file}: ${(result as any).error || 'unknown error'}`);
-      }
-    } catch (error) {
-      console.error(`Error processing ${file}:`, (error as Error).message);
+  // Perform initial pull
+  const results = await syncManager.pullFromAll();
+  for (const [name, result] of results) {
+    if (result.success && result.syncedItems > 0) {
+      console.error(`[${name}] Synced ${result.syncedItems} items from: ${syncDir}`);
+    } else if (!result.success) {
+      console.error(`[${name}] Sync error: ${result.error}`);
     }
+  }
+
+  // Start auto-sync if configured
+  if (SYNC_INTERVAL > 0) {
+    syncManager.startAutoSync();
+    console.error(`Auto-sync enabled: every ${SYNC_INTERVAL} seconds`);
   }
 }
 
@@ -792,12 +801,18 @@ server.prompt(
 );
 
 // Graceful shutdown
-process.on('SIGINT', () => {
+process.on('SIGINT', async () => {
+  if (syncManager) {
+    await syncManager.close();
+  }
   memoryManager.close();
   process.exit(0);
 });
 
-process.on('SIGTERM', () => {
+process.on('SIGTERM', async () => {
+  if (syncManager) {
+    await syncManager.close();
+  }
   memoryManager.close();
   process.exit(0);
 });
