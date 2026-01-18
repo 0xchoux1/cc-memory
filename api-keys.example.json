@@ -1,0 +1,10 @@
+{
+  "your-secret-api-key-here": {
+    "clientId": "client-1",
+    "scopes": ["memory:read", "memory:write"]
+  },
+  "another-api-key": {
+    "clientId": "client-2",
+    "scopes": ["memory:read", "memory:write"]
+  }
+}
