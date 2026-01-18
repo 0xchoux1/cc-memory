@@ -64,6 +64,113 @@ Add to your Claude Code MCP settings (`~/.claude/settings.json`):
 }
 ```
 
+## HTTP Server (Remote Access)
+
+cc-memory can also run as an HTTP server for remote access or cross-device memory sharing.
+
+### Start HTTP Server
+
+```bash
+npm run start:http
+```
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CC_MEMORY_PORT` | `3000` | HTTP server port |
+| `CC_MEMORY_HOST` | `127.0.0.1` | HTTP server host |
+| `CC_MEMORY_AUTH_MODE` | `apikey` | Authentication mode (`apikey` or `none`) |
+| `CC_MEMORY_API_KEYS_FILE` | `~/.claude-memory/api-keys.json` | Path to API keys file |
+| `CC_MEMORY_ALLOWED_HOSTS` | `127.0.0.1,localhost` | Comma-separated allowed hosts |
+| `CC_MEMORY_SESSION_TIMEOUT` | `1800000` | Session timeout in ms (30 min) |
+
+### API Keys Configuration
+
+Create `~/.claude-memory/api-keys.json`:
+
+```json
+{
+  "your-api-key-here": {
+    "clientId": "my-client",
+    "scopes": ["memory:read", "memory:write"]
+  }
+}
+```
+
+### Configure Claude Code for HTTP
+
+Add to your Claude Code MCP settings:
+
+```json
+{
+  "mcpServers": {
+    "cc-memory-remote": {
+      "type": "http",
+      "url": "http://127.0.0.1:3000/mcp",
+      "headers": {
+        "Authorization": "Bearer your-api-key-here"
+      }
+    }
+  }
+}
+```
+
+### Auto-Start with systemd (Linux)
+
+Create a systemd user service for automatic startup:
+
+```bash
+mkdir -p ~/.config/systemd/user
+```
+
+Create `~/.config/systemd/user/cc-memory-http.service`:
+
+```ini
+[Unit]
+Description=CC-Memory HTTP MCP Server
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/path/to/cc-memory
+ExecStart=/path/to/node dist/http-server.js
+Restart=on-failure
+RestartSec=5
+
+Environment=CC_MEMORY_PORT=3000
+Environment=CC_MEMORY_HOST=127.0.0.1
+Environment=CC_MEMORY_AUTH_MODE=apikey
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
+```
+
+Enable and start the service:
+
+```bash
+# Reload systemd
+systemctl --user daemon-reload
+
+# Enable auto-start
+systemctl --user enable cc-memory-http.service
+
+# Start the service
+systemctl --user start cc-memory-http.service
+
+# Check status
+systemctl --user status cc-memory-http
+
+# View logs
+journalctl --user -u cc-memory-http -f
+
+# Enable linger (keep service running after logout)
+loginctl enable-linger $USER
+```
+
 ## Usage
 
 ### Working Memory
