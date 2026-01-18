@@ -9,6 +9,7 @@ import type {
   EpisodicMemoryInput,
   EpisodeQuery,
   EpisodeOutcome,
+  Transcript,
 } from './types.js';
 
 export class EpisodicMemory {
@@ -43,9 +44,20 @@ export class EpisodicMemory {
       accessCount: 0,
       lastAccessed: now,
       tags: input.tags || [],
+      transcriptMetadata: input.transcript ? {
+        messageCount: input.transcript.length,
+        totalChars: JSON.stringify(input.transcript).length,
+        hasTranscript: true,
+      } : undefined,
     };
 
     this.storage.createEpisode(episode);
+
+    // Save transcript separately if provided
+    if (input.transcript && input.transcript.length > 0) {
+      this.storage.saveTranscript(episode.id, input.transcript);
+    }
+
     return episode;
   }
 
@@ -175,5 +187,23 @@ export class EpisodicMemory {
    */
   setSessionId(sessionId: string): void {
     this.sessionId = sessionId;
+  }
+
+  /**
+   * Get transcript for an episode
+   */
+  getTranscript(episodeId: string): Transcript | null {
+    return this.storage.getTranscript(episodeId);
+  }
+
+  /**
+   * Add messages to an existing transcript
+   */
+  addToTranscript(episodeId: string, messages: Transcript): boolean {
+    const existing = this.storage.getTranscript(episodeId);
+    const updated = [...(existing || []), ...messages];
+    this.storage.deleteTranscript(episodeId);
+    this.storage.saveTranscript(episodeId, updated);
+    return true;
   }
 }

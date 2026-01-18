@@ -37,6 +37,17 @@ export const WorkingClearSchema = z.object({
     .describe('If true, only clear expired items'),
 });
 
+export const TranscriptMessageSchema = z.object({
+  role: z.enum(['user', 'assistant', 'system']),
+  content: z.string(),
+  timestamp: z.number().optional(),
+  toolCalls: z.array(z.object({
+    name: z.string(),
+    input: z.unknown(),
+    output: z.unknown().optional(),
+  })).optional(),
+});
+
 export const EpisodeRecordSchema = z.object({
   type: z.enum(['incident', 'interaction', 'milestone', 'error', 'success'])
     .describe('Type of episode'),
@@ -55,9 +66,15 @@ export const EpisodeRecordSchema = z.object({
   }).optional().describe('Outcome of the episode'),
   importance: z.number().min(1).max(10).optional().describe('Importance level (1-10)'),
   tags: z.array(z.string()).optional().describe('Tags for categorization'),
+  transcript: z.array(TranscriptMessageSchema).optional()
+    .describe('Full conversation transcript (user and assistant messages)'),
 });
 
 export const EpisodeGetSchema = z.object({
+  id: z.string().describe('Episode ID'),
+});
+
+export const EpisodeGetTranscriptSchema = z.object({
   id: z.string().describe('Episode ID'),
 });
 
@@ -70,6 +87,8 @@ export const EpisodeSearchSchema = z.object({
   tags: z.array(z.string()).optional().describe('Filter by tags'),
   min_importance: z.number().optional().describe('Minimum importance level'),
   limit: z.number().optional().default(10).describe('Maximum results'),
+  search_transcript: z.boolean().optional().default(false)
+    .describe('Also search within transcript content (slower)'),
 });
 
 export const EpisodeUpdateSchema = z.object({
@@ -482,6 +501,7 @@ export function createToolHandlers(memoryManager: MemoryManager, storage: Sqlite
         outcome: args.outcome,
         importance: args.importance,
         tags: args.tags,
+        transcript: args.transcript,
       });
       return { success: true, episode };
     },
@@ -489,6 +509,14 @@ export function createToolHandlers(memoryManager: MemoryManager, storage: Sqlite
     episode_get: (args: z.infer<typeof EpisodeGetSchema>) => {
       const episode = memoryManager.episodic.get(args.id);
       return episode ? { success: true, episode } : { success: false, error: 'Episode not found' };
+    },
+
+    episode_get_transcript: (args: z.infer<typeof EpisodeGetTranscriptSchema>) => {
+      const transcript = memoryManager.episodic.getTranscript(args.id);
+      if (!transcript) {
+        return { success: false, error: 'Transcript not found' };
+      }
+      return { success: true, transcript, messageCount: transcript.length };
     },
 
     episode_search: (args: z.infer<typeof EpisodeSearchSchema>) => {
@@ -502,6 +530,7 @@ export function createToolHandlers(memoryManager: MemoryManager, storage: Sqlite
         tags: args.tags,
         minImportance: args.min_importance,
         limit: args.limit,
+        searchTranscript: args.search_transcript,
       });
       return { success: true, episodes, count: episodes.length };
     },

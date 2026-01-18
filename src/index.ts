@@ -21,6 +21,7 @@ import {
   WorkingClearSchema,
   EpisodeRecordSchema,
   EpisodeGetSchema,
+  EpisodeGetTranscriptSchema,
   EpisodeSearchSchema,
   EpisodeUpdateSchema,
   EpisodeRelateSchema,
@@ -260,6 +261,16 @@ server.tool(
   EpisodeGetSchema.shape,
   async (args) => {
     const result = handlers.episode_get(args as z.infer<typeof EpisodeGetSchema>);
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  'episode_get_transcript',
+  'Get the full conversation transcript for an episode',
+  EpisodeGetTranscriptSchema.shape,
+  async (args) => {
+    const result = handlers.episode_get_transcript(args as z.infer<typeof EpisodeGetTranscriptSchema>);
     return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
   }
 );

@@ -41,6 +41,7 @@ import type {
   WisdomEntityInput,
   WisdomQuery,
   WisdomApplication,
+  Transcript,
 } from '../memory/types.js';
 
 export class SqliteStorage {
@@ -143,6 +144,21 @@ export class SqliteStorage {
     this.db.run(`CREATE INDEX IF NOT EXISTS idx_episode_timestamp ON episodic_memory(timestamp)`);
     this.db.run(`CREATE INDEX IF NOT EXISTS idx_episode_type ON episodic_memory(type)`);
     this.db.run(`CREATE INDEX IF NOT EXISTS idx_episode_importance ON episodic_memory(importance)`);
+
+    // Episode Transcripts table (separate for performance)
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS episode_transcripts (
+        id TEXT PRIMARY KEY,
+        episode_id TEXT NOT NULL,
+        transcript TEXT NOT NULL,
+        message_count INTEGER NOT NULL,
+        total_chars INTEGER NOT NULL,
+        created_at INTEGER NOT NULL,
+        FOREIGN KEY (episode_id) REFERENCES episodic_memory(id) ON DELETE CASCADE
+      )
+    `);
+
+    this.db.run(`CREATE INDEX IF NOT EXISTS idx_transcript_episode ON episode_transcripts(episode_id)`);
 
     // Semantic Entities table
     this.db.run(`
@@ -621,42 +637,55 @@ export class SqliteStorage {
   searchEpisodes(query: EpisodeQuery): EpisodicMemory[] {
     if (!this.db) return [];
 
-    let sql = 'SELECT * FROM episodic_memory WHERE 1=1';
+    let sql: string;
     const params: (string | number)[] = [];
 
+    // Use LEFT JOIN when searching transcripts, otherwise simple query
+    if (query.searchTranscript && query.query) {
+      sql = 'SELECT DISTINCT em.* FROM episodic_memory em LEFT JOIN episode_transcripts et ON em.id = et.episode_id WHERE 1=1';
+    } else {
+      sql = 'SELECT * FROM episodic_memory em WHERE 1=1';
+    }
+
     if (query.query) {
-      // Simple text search (LIKE-based since FTS5 is not available in sql.js by default)
-      sql += ' AND (summary LIKE ? OR details LIKE ?)';
-      params.push(`%${query.query}%`, `%${query.query}%`);
+      if (query.searchTranscript) {
+        // Search in summary, details, AND transcript content
+        sql += ' AND (em.summary LIKE ? OR em.details LIKE ? OR et.transcript LIKE ?)';
+        params.push(`%${query.query}%`, `%${query.query}%`, `%${query.query}%`);
+      } else {
+        // Simple text search (LIKE-based since FTS5 is not available in sql.js by default)
+        sql += ' AND (em.summary LIKE ? OR em.details LIKE ?)';
+        params.push(`%${query.query}%`, `%${query.query}%`);
+      }
     }
 
     if (query.type) {
-      sql += ' AND type = ?';
+      sql += ' AND em.type = ?';
       params.push(query.type);
     }
 
     if (query.dateRange?.start) {
-      sql += ' AND timestamp >= ?';
+      sql += ' AND em.timestamp >= ?';
       params.push(query.dateRange.start);
     }
 
     if (query.dateRange?.end) {
-      sql += ' AND timestamp <= ?';
+      sql += ' AND em.timestamp <= ?';
       params.push(query.dateRange.end);
     }
 
     if (query.minImportance !== undefined) {
-      sql += ' AND importance >= ?';
+      sql += ' AND em.importance >= ?';
       params.push(query.minImportance);
     }
 
     if (query.tags && query.tags.length > 0) {
-      const tagConditions = query.tags.map(() => 'tags LIKE ?').join(' OR ');
+      const tagConditions = query.tags.map(() => 'em.tags LIKE ?').join(' OR ');
       sql += ` AND (${tagConditions})`;
       params.push(...query.tags.map(tag => `%"${tag}"%`));
     }
 
-    sql += ' ORDER BY timestamp DESC';
+    sql += ' ORDER BY em.timestamp DESC';
 
     if (query.limit) {
       sql += ' LIMIT ?';
@@ -1086,6 +1115,9 @@ export class SqliteStorage {
       }
     }
 
+    // Get all transcripts
+    const transcripts = this.getAllTranscripts();
+
     let entities: SemanticEntity[] = [];
     let relations: SemanticRelation[] = [];
     if (this.db) {
@@ -1105,6 +1137,7 @@ export class SqliteStorage {
       exportedAt: Date.now(),
       working,
       episodic,
+      transcripts: Object.keys(transcripts).length > 0 ? transcripts : undefined,
       semantic: {
         entities,
         relations,
@@ -1166,6 +1199,12 @@ export class SqliteStorage {
           this.createEpisode(episode);
         }
         result.imported.episodic++;
+
+        // Import associated transcript if exists
+        if (data.transcripts && data.transcripts[episode.id]) {
+          this.deleteTranscript(episode.id); // Remove old transcript if exists
+          this.saveTranscript(episode.id, data.transcripts[episode.id]);
+        }
       }
     }
 
@@ -1214,10 +1253,100 @@ export class SqliteStorage {
   deleteEpisode(id: string): boolean {
     if (!this.db) return false;
 
+    // Transcript will be deleted automatically via ON DELETE CASCADE
     this.db.run('DELETE FROM episodic_memory WHERE id = ?', [id]);
     const changes = this.db.getRowsModified();
     this.save();
     return changes > 0;
+  }
+
+  // ============================================================================
+  // Transcript Operations
+  // ============================================================================
+
+  /**
+   * Save a transcript for an episode
+   */
+  saveTranscript(episodeId: string, transcript: Transcript): string {
+    if (!this.db) return '';
+
+    const id = `tr_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const content = JSON.stringify(transcript);
+    const messageCount = transcript.length;
+    const totalChars = content.length;
+
+    this.db.run(`
+      INSERT INTO episode_transcripts (id, episode_id, transcript, message_count, total_chars, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `, [id, episodeId, content, messageCount, totalChars, Date.now()]);
+
+    this.save();
+    return id;
+  }
+
+  /**
+   * Get transcript for an episode
+   */
+  getTranscript(episodeId: string): Transcript | null {
+    if (!this.db) return null;
+
+    const result = this.db.exec(
+      'SELECT transcript FROM episode_transcripts WHERE episode_id = ?',
+      [episodeId]
+    );
+
+    if (result.length === 0 || result[0].values.length === 0) return null;
+
+    return JSON.parse(result[0].values[0][0] as string);
+  }
+
+  /**
+   * Get transcript metadata for an episode
+   */
+  getTranscriptMetadata(episodeId: string): { messageCount: number; totalChars: number } | null {
+    if (!this.db) return null;
+
+    const result = this.db.exec(
+      'SELECT message_count, total_chars FROM episode_transcripts WHERE episode_id = ?',
+      [episodeId]
+    );
+
+    if (result.length === 0 || result[0].values.length === 0) return null;
+
+    return {
+      messageCount: result[0].values[0][0] as number,
+      totalChars: result[0].values[0][1] as number,
+    };
+  }
+
+  /**
+   * Delete transcript for an episode
+   */
+  deleteTranscript(episodeId: string): boolean {
+    if (!this.db) return false;
+
+    this.db.run('DELETE FROM episode_transcripts WHERE episode_id = ?', [episodeId]);
+    const changes = this.db.getRowsModified();
+    this.save();
+    return changes > 0;
+  }
+
+  /**
+   * Get all transcripts (for export)
+   */
+  getAllTranscripts(): Record<string, Transcript> {
+    if (!this.db) return {};
+
+    const result = this.db.exec('SELECT episode_id, transcript FROM episode_transcripts');
+    if (result.length === 0) return {};
+
+    const transcripts: Record<string, Transcript> = {};
+    for (const row of result[0].values) {
+      const episodeId = row[0] as string;
+      const transcript = JSON.parse(row[1] as string);
+      transcripts[episodeId] = transcript;
+    }
+    return transcripts;
   }
 
   /**

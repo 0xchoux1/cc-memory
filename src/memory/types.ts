@@ -55,6 +55,26 @@ export const WORKING_MEMORY_TTL: Record<WorkingMemoryType, number> = {
 export type EpisodeType = 'incident' | 'interaction' | 'milestone' | 'error' | 'success';
 export type OutcomeStatus = 'success' | 'failure' | 'partial';
 
+// Transcript types for recording full conversation history
+export interface TranscriptMessage {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  timestamp?: number;
+  toolCalls?: Array<{
+    name: string;
+    input?: unknown;
+    output?: unknown;
+  }>;
+}
+
+export type Transcript = TranscriptMessage[];
+
+export interface TranscriptMetadata {
+  messageCount: number;
+  totalChars: number;
+  hasTranscript: boolean;
+}
+
 export interface EpisodeContext {
   projectPath?: string;
   branch?: string;
@@ -83,6 +103,7 @@ export interface EpisodicMemory {
   accessCount: number;
   lastAccessed: number;
   tags: string[];
+  transcriptMetadata?: TranscriptMetadata;
 }
 
 export interface EpisodicMemoryInput {
@@ -93,6 +114,7 @@ export interface EpisodicMemoryInput {
   outcome?: EpisodeOutcome;
   importance?: number;
   tags?: string[];
+  transcript?: Transcript;
 }
 
 export interface EpisodeQuery {
@@ -106,6 +128,7 @@ export interface EpisodeQuery {
   minImportance?: number;
   limit?: number;
   offset?: number;
+  searchTranscript?: boolean;
 }
 
 // ============================================================================
@@ -201,6 +224,7 @@ export interface MemoryExport {
   exportedAt: number;
   working: WorkingMemoryItem[];
   episodic: EpisodicMemory[];
+  transcripts?: Record<string, Transcript>;
   semantic: {
     entities: SemanticEntity[];
     relations: SemanticRelation[];
