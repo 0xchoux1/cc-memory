@@ -26,6 +26,7 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.71.2",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "express": "^5.2.1",
     "express-rate-limit": "^8.2.1",
