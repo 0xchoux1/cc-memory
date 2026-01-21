@@ -87,15 +87,21 @@ npm run start:http
 
 ### API Keys Configuration
 
-Create `~/.claude-memory/api-keys.json`:
+Create `~/.claude-memory/api-keys.json` (keys can be stored as `sha256:` hashes to avoid plaintext on disk):
 
 ```json
 {
-  "your-api-key-here": {
+  "sha256:your-api-key-hash-here": {
     "clientId": "my-client",
     "scopes": ["memory:read", "memory:write"]
   }
 }
+```
+
+To generate a hash:
+
+```bash
+node scripts/hash-api-key.js your-api-key-here
 ```
 
 ### Configure Claude Code for HTTP

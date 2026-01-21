@@ -48,7 +48,11 @@ export class FileSyncAdapter implements SyncAdapter {
 
   async push(delta: ParallelizationExport): Promise<SyncResult> {
     try {
-      const filename = `${delta.tachikomaId}_${delta.exportedAt}.json`;
+      const safeId = this.sanitizeFilenamePart(delta.tachikomaId);
+      if (!safeId) {
+        throw new Error('Invalid Tachikoma ID for filename');
+      }
+      const filename = `${safeId}_${delta.exportedAt}.json`;
       const filepath = join(this.syncDir, filename);
 
       writeFileSync(filepath, JSON.stringify(delta, null, 2), 'utf-8');
@@ -203,6 +207,10 @@ export class FileSyncAdapter implements SyncAdapter {
     } catch (error) {
       console.error(`Failed to mark file as imported: ${filePath}`, error);
     }
+  }
+
+  private sanitizeFilenamePart(value: string): string {
+    return value.replace(/[^a-zA-Z0-9._-]/g, '_');
   }
 
   /**

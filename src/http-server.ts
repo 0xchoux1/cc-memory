@@ -4,11 +4,10 @@
  * Remote MCP server for cross-hardware memory sharing
  */
 
-import express from 'express';
+import express, { type Response } from 'express';
 import { createServer } from 'http';
 import { homedir } from 'os';
 import { join } from 'path';
-import { randomUUID } from 'crypto';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 
@@ -65,14 +64,86 @@ const authMiddleware = AUTH_MODE === 'none'
   ? createNoAuth()
   : createApiKeyAuth({ keys: loadApiKeysFromFile(API_KEYS_FILE) });
 
+function hasScopes(req: AuthenticatedRequest, res: Response, scopes: string[]): boolean {
+  const missing = scopes.filter(scope => !req.auth?.scopes?.includes(scope));
+  if (missing.length > 0) {
+    res.status(403).json({
+      error: 'forbidden',
+      message: `Missing required scopes: ${missing.join(', ')}`,
+    });
+    return false;
+  }
+  return true;
+}
+
+function closeTransport(transports: Map<string, StreamableHTTPServerTransport>, sessionId: string): void {
+  const transport = transports.get(sessionId);
+  if (transport) {
+    void transport.close();
+    transports.delete(sessionId);
+  }
+}
+
+const WRITE_TOOLS = new Set([
+  'working_set',
+  'working_delete',
+  'working_clear',
+  'episode_record',
+  'episode_update',
+  'episode_relate',
+  'semantic_create',
+  'semantic_add_observation',
+  'semantic_relate',
+  'semantic_update',
+  'memory_consolidate',
+  'memory_import',
+  'memory_decay',
+  'memory_boost',
+  'tachikoma_init',
+  'tachikoma_import',
+  'tachikoma_resolve_conflict',
+  'agent_register',
+  'pattern_create',
+  'pattern_confirm',
+  'insight_create',
+  'insight_validate',
+  'wisdom_create',
+  'wisdom_apply',
+]);
+
+function requiredScopesForRequest(body: unknown): string[] {
+  const requests = Array.isArray(body) ? body : [body];
+  let needsWrite = false;
+
+  for (const request of requests) {
+    if (!request || typeof request !== 'object') {
+      continue;
+    }
+
+    const method = (request as { method?: string }).method;
+    const params = (request as { params?: Record<string, unknown> }).params;
+
+    if (method === 'tools/call') {
+      const toolName = typeof params?.name === 'string' ? params.name : '';
+      if (WRITE_TOOLS.has(toolName)) {
+        needsWrite = true;
+      }
+      continue;
+    }
+  }
+
+  return needsWrite ? ['memory:write'] : ['memory:read'];
+}
+
+// Map to store transports for each session
+const transports = new Map<string, StreamableHTTPServerTransport>();
+
 // Session manager
 const sessionManager = new SessionManager({
   dataPath: DATA_PATH,
   sessionTimeout: SESSION_TIMEOUT,
+  onRemoveSession: (sessionId) => closeTransport(transports, sessionId),
 });
-
-// Map to store transports for each session
-const transports = new Map<string, StreamableHTTPServerTransport>();
 
 // MCP endpoint (handles POST for requests and GET for SSE)
 app.all('/mcp', authMiddleware, async (req: AuthenticatedRequest, res) => {
@@ -87,6 +158,10 @@ app.all('/mcp', authMiddleware, async (req: AuthenticatedRequest, res) => {
       const isInit = isInitializeRequest(body);
 
       if (isInit) {
+        if (!hasScopes(req, res, ['memory:read'])) {
+          return;
+        }
+
         // Create new session and transport
         const session = sessionManager.getOrCreate(undefined, clientId);
 
@@ -105,7 +180,26 @@ app.all('/mcp', authMiddleware, async (req: AuthenticatedRequest, res) => {
         // Handle the request
         await transport.handleRequest(req, res, body);
       } else if (sessionId) {
+        const requiredScopes = requiredScopesForRequest(body);
+        if (!hasScopes(req, res, requiredScopes)) {
+          return;
+        }
+
         // Existing session - get transport
+        const session = sessionManager.get(sessionId);
+        if (!session || session.clientId !== clientId) {
+          closeTransport(transports, sessionId);
+          res.status(403).json({
+            jsonrpc: '2.0',
+            error: {
+              code: -32600,
+              message: 'Invalid session ID or client mismatch',
+            },
+            id: null,
+          });
+          return;
+        }
+
         const transport = transports.get(sessionId);
         if (!transport) {
           res.status(400).json({
@@ -140,6 +234,20 @@ app.all('/mcp', authMiddleware, async (req: AuthenticatedRequest, res) => {
         return;
       }
 
+      if (!hasScopes(req, res, ['memory:read'])) {
+        return;
+      }
+
+      const session = sessionManager.get(sessionId);
+      if (!session || session.clientId !== clientId) {
+        closeTransport(transports, sessionId);
+        res.status(403).json({
+          error: 'forbidden',
+          message: 'Invalid session ID or client mismatch',
+        });
+        return;
+      }
+
       const transport = transports.get(sessionId);
       if (!transport) {
         res.status(400).json({
@@ -153,6 +261,20 @@ app.all('/mcp', authMiddleware, async (req: AuthenticatedRequest, res) => {
     } else if (req.method === 'DELETE') {
       // Close session
       if (sessionId) {
+        if (!hasScopes(req, res, ['memory:write'])) {
+          return;
+        }
+
+        const session = sessionManager.get(sessionId);
+        if (!session || session.clientId !== clientId) {
+          closeTransport(transports, sessionId);
+          res.status(403).json({
+            error: 'forbidden',
+            message: 'Invalid session ID or client mismatch',
+          });
+          return;
+        }
+
         const transport = transports.get(sessionId);
         if (transport) {
           await transport.close();

@@ -14,6 +14,13 @@ export function hashApiKey(key: string): string {
   return createHash('sha256').update(key).digest('hex');
 }
 
+function normalizeStoredKey(key: string): string {
+  if (key.startsWith('sha256:')) {
+    return key.slice('sha256:'.length).toLowerCase();
+  }
+  return hashApiKey(key);
+}
+
 /**
  * Load API keys from a JSON file
  */
@@ -34,7 +41,8 @@ export function loadApiKeysFromFile(filePath: string): Map<string, ApiKeyInfo> {
     }>;
 
     for (const [key, info] of Object.entries(data)) {
-      keys.set(key, {
+      const normalizedKey = normalizeStoredKey(key);
+      keys.set(normalizedKey, {
         clientId: info.clientId,
         scopes: info.scopes ?? ['memory:read', 'memory:write'],
         createdAt: Date.now(),
@@ -74,7 +82,8 @@ export function createApiKeyAuth(config: ApiKeyConfig): RequestHandler {
     }
 
     const apiKey = authHeader.slice(7);
-    const keyInfo = config.keys.get(apiKey);
+    const hashedKey = hashApiKey(apiKey);
+    const keyInfo = config.keys.get(hashedKey);
 
     if (!keyInfo) {
       res.status(401).json({

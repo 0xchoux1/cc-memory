@@ -1,9 +1,9 @@
 {
-  "your-secret-api-key-here": {
+  "sha256:your-api-key-hash-here": {
     "clientId": "client-1",
     "scopes": ["memory:read", "memory:write"]
   },
-  "another-api-key": {
+  "sha256:another-api-key-hash": {
     "clientId": "client-2",
     "scopes": ["memory:read", "memory:write"]
   }

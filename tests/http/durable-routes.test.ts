@@ -10,6 +10,7 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import express, { type Express } from 'express';
 import request from 'supertest';
+import { createServer, type Server } from 'http';
 import { MemoryManager } from '../../src/memory/MemoryManager.js';
 import { WorkflowManager, type WorkflowStorage, type StepExecutor, type ExecutionContext } from '../../src/durable/WorkflowManager.js';
 import { AgentCoordinator, type AgentStorage } from '../../src/agents/AgentCoordinator.js';
@@ -168,13 +169,36 @@ class SimpleTestExecutor implements StepExecutor {
   }
 }
 
-describe('Durable HTTP Routes', () => {
+async function supportsListen(): Promise<boolean> {
+  const testServer = createServer((_req, res) => res.end('ok'));
+  try {
+    await new Promise<void>((resolve, reject) => {
+      testServer.once('error', reject);
+      testServer.listen(0, '127.0.0.1', () => resolve());
+    });
+    return true;
+  } catch {
+    return false;
+  } finally {
+    try {
+      testServer.close();
+    } catch {
+      // ignore
+    }
+  }
+}
+
+const canListen = await supportsListen();
+const describeIf = canListen ? describe : describe.skip;
+
+describeIf('Durable HTTP Routes', () => {
   let memoryManager: MemoryManager;
   let sqliteStorage: SqliteStorage;
   let adapter: TestStorageAdapter;
   let workflowManager: WorkflowManager;
   let agentCoordinator: AgentCoordinator;
   let app: Express;
+  let server: Server;
   let testDataPath: string;
 
   beforeEach(async () => {
@@ -199,9 +223,16 @@ describe('Durable HTTP Routes', () => {
     app.use(express.json());
     const router = createDurableRouter({ workflowManager, agentCoordinator });
     app.use('/api/durable', router);
+
+    server = createServer(app);
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', () => resolve());
+    });
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
     memoryManager.close();
     if (existsSync(testDataPath)) {
       rmSync(testDataPath, { recursive: true, force: true });
@@ -210,7 +241,7 @@ describe('Durable HTTP Routes', () => {
 
   describe('POST /api/durable/workflows', () => {
     it('should create a workflow', async () => {
-      const response = await request(app)
+      const response = await request(server)
         .post('/api/durable/workflows')
         .send({
           definition: {
@@ -229,7 +260,7 @@ describe('Durable HTTP Routes', () => {
     });
 
     it('should return 400 for invalid definition', async () => {
-      const response = await request(app)
+      const response = await request(server)
         .post('/api/durable/workflows')
         .send({ definition: {} })
         .expect(400);
@@ -241,7 +272,7 @@ describe('Durable HTTP Routes', () => {
   describe('GET /api/durable/workflows', () => {
     it('should list workflows', async () => {
       // Create a workflow first
-      await request(app)
+      await request(server)
         .post('/api/durable/workflows')
         .send({
           definition: {
@@ -250,7 +281,7 @@ describe('Durable HTTP Routes', () => {
           },
         });
 
-      const response = await request(app)
+      const response = await request(server)
         .get('/api/durable/workflows')
         .expect(200);
 
@@ -259,7 +290,7 @@ describe('Durable HTTP Routes', () => {
     });
 
     it('should filter by status', async () => {
-      const response = await request(app)
+      const response = await request(server)
         .get('/api/durable/workflows?status=completed')
         .expect(200);
 
@@ -269,7 +300,7 @@ describe('Durable HTTP Routes', () => {
 
   describe('GET /api/durable/workflows/:id', () => {
     it('should get workflow details', async () => {
-      const createRes = await request(app)
+      const createRes = await request(server)
         .post('/api/durable/workflows')
         .send({
           definition: {
@@ -278,7 +309,7 @@ describe('Durable HTTP Routes', () => {
           },
         });
 
-      const response = await request(app)
+      const response = await request(server)
         .get(`/api/durable/workflows/${createRes.body.id}`)
         .expect(200);
 
@@ -288,7 +319,7 @@ describe('Durable HTTP Routes', () => {
     });
 
     it('should return 404 for non-existent workflow', async () => {
-      await request(app)
+      await request(server)
         .get('/api/durable/workflows/non-existent-id')
         .expect(404);
     });
@@ -296,7 +327,7 @@ describe('Durable HTTP Routes', () => {
 
   describe('POST /api/durable/workflows/:id/execute', () => {
     it('should execute a workflow', async () => {
-      const createRes = await request(app)
+      const createRes = await request(server)
         .post('/api/durable/workflows')
         .send({
           definition: {
@@ -305,7 +336,7 @@ describe('Durable HTTP Routes', () => {
           },
         });
 
-      const response = await request(app)
+      const response = await request(server)
         .post(`/api/durable/workflows/${createRes.body.id}/execute`)
         .send({})
         .expect(200);
@@ -315,7 +346,7 @@ describe('Durable HTTP Routes', () => {
     });
 
     it('should execute in parallel mode', async () => {
-      const createRes = await request(app)
+      const createRes = await request(server)
         .post('/api/durable/workflows')
         .send({
           definition: {
@@ -327,7 +358,7 @@ describe('Durable HTTP Routes', () => {
           },
         });
 
-      const response = await request(app)
+      const response = await request(server)
         .post(`/api/durable/workflows/${createRes.body.id}/execute`)
         .send({ parallel: true })
         .expect(200);
@@ -338,7 +369,7 @@ describe('Durable HTTP Routes', () => {
 
   describe('POST /api/durable/agents', () => {
     it('should register an agent', async () => {
-      const response = await request(app)
+      const response = await request(server)
         .post('/api/durable/agents')
         .send({
           name: 'test-agent',
@@ -355,7 +386,7 @@ describe('Durable HTTP Routes', () => {
     });
 
     it('should return 400 for missing required fields', async () => {
-      await request(app)
+      await request(server)
         .post('/api/durable/agents')
         .send({ name: 'test' })
         .expect(400);
@@ -364,11 +395,11 @@ describe('Durable HTTP Routes', () => {
 
   describe('GET /api/durable/agents', () => {
     it('should list agents', async () => {
-      await request(app)
+      await request(server)
         .post('/api/durable/agents')
         .send({ name: 'list-test', role: 'frontend' });
 
-      const response = await request(app)
+      const response = await request(server)
         .get('/api/durable/agents')
         .expect(200);
 
@@ -376,11 +407,11 @@ describe('Durable HTTP Routes', () => {
     });
 
     it('should filter by role', async () => {
-      await request(app)
+      await request(server)
         .post('/api/durable/agents')
         .send({ name: 'backend-agent', role: 'backend' });
 
-      const response = await request(app)
+      const response = await request(server)
         .get('/api/durable/agents?role=backend')
         .expect(200);
 
@@ -390,11 +421,11 @@ describe('Durable HTTP Routes', () => {
 
   describe('GET /api/durable/agents/:id', () => {
     it('should get agent details', async () => {
-      const createRes = await request(app)
+      const createRes = await request(server)
         .post('/api/durable/agents')
         .send({ name: 'get-test', role: 'testing' });
 
-      const response = await request(app)
+      const response = await request(server)
         .get(`/api/durable/agents/${createRes.body.id}`)
         .expect(200);
 
@@ -403,7 +434,7 @@ describe('Durable HTTP Routes', () => {
     });
 
     it('should return 404 for non-existent agent', async () => {
-      await request(app)
+      await request(server)
         .get('/api/durable/agents/non-existent-id')
         .expect(404);
     });
@@ -411,7 +442,7 @@ describe('Durable HTTP Routes', () => {
 
   describe('POST /api/durable/tasks', () => {
     it('should create a task', async () => {
-      const response = await request(app)
+      const response = await request(server)
         .post('/api/durable/tasks')
         .send({
           summary: 'Test task',
@@ -425,7 +456,7 @@ describe('Durable HTTP Routes', () => {
     });
 
     it('should return 400 for missing summary', async () => {
-      await request(app)
+      await request(server)
         .post('/api/durable/tasks')
         .send({ description: 'No summary' })
         .expect(400);
@@ -435,17 +466,17 @@ describe('Durable HTTP Routes', () => {
   describe('POST /api/durable/tasks/:id/delegate', () => {
     it('should delegate task to agent', async () => {
       // Create agent
-      const agentRes = await request(app)
+      const agentRes = await request(server)
         .post('/api/durable/agents')
         .send({ name: 'delegate-target', role: 'backend' });
 
       // Create task
-      const taskRes = await request(app)
+      const taskRes = await request(server)
         .post('/api/durable/tasks')
         .send({ summary: 'Delegated task' });
 
       // Delegate
-      const response = await request(app)
+      const response = await request(server)
         .post(`/api/durable/tasks/${taskRes.body.id}/delegate`)
         .send({ agentId: agentRes.body.id })
         .expect(200);
@@ -455,11 +486,11 @@ describe('Durable HTTP Routes', () => {
     });
 
     it('should return 400 for missing agentId', async () => {
-      const taskRes = await request(app)
+      const taskRes = await request(server)
         .post('/api/durable/tasks')
         .send({ summary: 'Task' });
 
-      await request(app)
+      await request(server)
         .post(`/api/durable/tasks/${taskRes.body.id}/delegate`)
         .send({})
         .expect(400);
@@ -468,7 +499,7 @@ describe('Durable HTTP Routes', () => {
 
   describe('GET /api/durable/status', () => {
     it('should get coordinator status', async () => {
-      const response = await request(app)
+      const response = await request(server)
         .get('/api/durable/status')
         .expect(200);
 
@@ -480,7 +511,7 @@ describe('Durable HTTP Routes', () => {
 
   describe('workflow lifecycle', () => {
     it('should handle workflow cancel', async () => {
-      const createRes = await request(app)
+      const createRes = await request(server)
         .post('/api/durable/workflows')
         .send({
           definition: {
@@ -489,7 +520,7 @@ describe('Durable HTTP Routes', () => {
           },
         });
 
-      const response = await request(app)
+      const response = await request(server)
         .post(`/api/durable/workflows/${createRes.body.id}/cancel`)
         .send({ reason: 'Testing cancellation' })
         .expect(200);
