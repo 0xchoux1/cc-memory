@@ -54,8 +54,22 @@ export function createHostValidation(config: SecurityConfig): RequestHandler {
       return;
     }
 
-    // Extract hostname (without port)
-    const hostname = host.split(':')[0];
+    // Extract hostname (without port), handling IPv6 addresses like [::1]:3000
+    let hostname: string;
+    if (host.startsWith('[')) {
+      // IPv6 address: [::1]:3000 or [::1]
+      const closingBracket = host.indexOf(']');
+      hostname = closingBracket > 0 ? host.slice(1, closingBracket) : host.slice(1);
+    } else {
+      // IPv4 or hostname: 127.0.0.1:3000 or localhost:3000
+      const colonIndex = host.lastIndexOf(':');
+      // Only treat as port separator if there's something after it that looks like a port
+      if (colonIndex > 0 && /^\d+$/.test(host.slice(colonIndex + 1))) {
+        hostname = host.slice(0, colonIndex);
+      } else {
+        hostname = host;
+      }
+    }
 
     const isAllowed = allowedHosts.some(allowed => {
       if (allowed.startsWith('*.')) {
@@ -108,6 +122,10 @@ export function createHttpsEnforcement(config: SecurityConfig): RequestHandler {
 
 /**
  * Create CORS middleware for MCP
+ *
+ * Security: If allowedOrigins is not specified, CORS headers are NOT sent.
+ * This prevents credential leakage to arbitrary origins.
+ * To enable CORS, explicitly provide an allowlist of origins.
  */
 export function createCorsMiddleware(allowedOrigins?: string[]): RequestHandler {
   return (req: Request, res: Response, next: NextFunction) => {
@@ -119,18 +137,33 @@ export function createCorsMiddleware(allowedOrigins?: string[]): RequestHandler 
       return;
     }
 
+    // If no allowedOrigins configured, deny CORS (secure default)
+    if (!allowedOrigins || allowedOrigins.length === 0) {
+      // Handle preflight without CORS headers (browser will block)
+      if (req.method === 'OPTIONS') {
+        res.status(204).end();
+        return;
+      }
+      next();
+      return;
+    }
+
     // Check if origin is allowed
-    const isAllowed = !allowedOrigins ||
-      allowedOrigins.includes('*') ||
-      allowedOrigins.includes(origin);
+    const isAllowed = allowedOrigins.includes('*') || allowedOrigins.includes(origin);
 
     if (isAllowed) {
-      res.setHeader('Access-Control-Allow-Origin', origin);
+      // For wildcard, don't send credentials (browsers block this anyway)
+      if (allowedOrigins.includes('*')) {
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        // Note: Cannot use credentials with wildcard origin
+      } else {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+      }
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Mcp-Session-Id');
       res.setHeader('Access-Control-Expose-Headers', 'Mcp-Session-Id');
       res.setHeader('Access-Control-Max-Age', '86400');
-      res.setHeader('Access-Control-Allow-Credentials', 'true');
     }
 
     // Handle preflight

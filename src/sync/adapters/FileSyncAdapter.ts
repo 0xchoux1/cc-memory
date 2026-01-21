@@ -203,7 +203,7 @@ export class FileSyncAdapter implements SyncAdapter {
    */
   private markAsImported(filePath: string): void {
     try {
-      renameSync(filePath, filePath.replace('.json', '.imported.json'));
+      renameSync(filePath, filePath.replace(/\.json$/, '.imported.json'));
     } catch (error) {
       console.error(`Failed to mark file as imported: ${filePath}`, error);
     }

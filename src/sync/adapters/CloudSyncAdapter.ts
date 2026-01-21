@@ -61,7 +61,11 @@ export class CloudSyncAdapter implements SyncAdapter {
 
   async push(delta: ParallelizationExport): Promise<SyncResult> {
     try {
-      const filename = `${delta.tachikomaId}_${delta.exportedAt}.json`;
+      const safeId = this.sanitizeFilenamePart(delta.tachikomaId);
+      if (!safeId) {
+        throw new Error('Invalid Tachikoma ID for filename');
+      }
+      const filename = `${safeId}_${delta.exportedAt}.json`;
       const filepath = join(this.syncDir, filename);
 
       writeFileSync(filepath, JSON.stringify(delta, null, 2), 'utf-8');
@@ -121,7 +125,7 @@ export class CloudSyncAdapter implements SyncAdapter {
         this.markAsImported(filePath);
 
         // Update known files
-        this.knownFiles.add(file.replace('.json', '.imported.json'));
+        this.knownFiles.add(file.replace(/\.json$/, '.imported.json'));
       } catch (error) {
         console.error(`[CloudSync] Error processing ${file}:`, (error as Error).message);
       }
@@ -231,14 +235,14 @@ export class CloudSyncAdapter implements SyncAdapter {
           // Skip if it's from ourselves
           if (this.currentTachikomaId && data.tachikomaId === this.currentTachikomaId) {
             this.markAsImported(filePath);
-            this.knownFiles.add(file.replace('.json', '.imported.json'));
+            this.knownFiles.add(file.replace(/\.json$/, '.imported.json'));
             continue;
           }
 
           // Trigger callback
           this.onSyncCallback(data);
           this.markAsImported(filePath);
-          this.knownFiles.add(file.replace('.json', '.imported.json'));
+          this.knownFiles.add(file.replace(/\.json$/, '.imported.json'));
           this.lastSyncAt = Date.now();
         } catch (error) {
           console.error(`[CloudSync] Error processing new file ${file}:`, (error as Error).message);
@@ -275,10 +279,17 @@ export class CloudSyncAdapter implements SyncAdapter {
    */
   private markAsImported(filePath: string): void {
     try {
-      renameSync(filePath, filePath.replace('.json', '.imported.json'));
+      renameSync(filePath, filePath.replace(/\.json$/, '.imported.json'));
     } catch (error) {
       console.error(`[CloudSync] Failed to mark file as imported: ${filePath}`, error);
     }
+  }
+
+  /**
+   * Sanitize a string for use in filenames
+   */
+  private sanitizeFilenamePart(value: string): string {
+    return value.replace(/[^a-zA-Z0-9._-]/g, '_');
   }
 
   /**
