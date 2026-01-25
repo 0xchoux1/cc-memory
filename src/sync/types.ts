@@ -15,7 +15,7 @@ import type {
 // ============================================================================
 
 /** Available sync adapter types */
-export type SyncAdapterType = 'file' | 'cloud' | 'http' | 'websocket';
+export type SyncAdapterType = 'file' | 'cloud' | 'http' | 'websocket' | 'github';
 
 /** Sync operation result */
 export interface SyncResult {
@@ -61,6 +61,54 @@ export interface WebSocketSyncAdapterConfig extends SyncAdapterConfig {
   serverUrl: string;
   apiKey: string;
   reconnectInterval?: number;  // Reconnect interval in ms (default: 5000)
+}
+
+/** GitHub sync adapter configuration */
+export interface GitHubSyncAdapterConfig extends SyncAdapterConfig {
+  /** Git repository URL (SSH or HTTPS) */
+  repoUrl: string;
+
+  /** Local path for the cloned repository */
+  localPath: string;
+
+  /** Branch to use (default: 'main') */
+  branch?: string;
+
+  /** Subdirectory within the repo for deltas (default: 'deltas') */
+  deltasDir?: string;
+
+  /** Author name for commits */
+  authorName?: string;
+
+  /** Author email for commits */
+  authorEmail?: string;
+
+  /** Auto-pull before push (default: true) */
+  autoPull?: boolean;
+
+  /** Auto-push after commit (default: true) */
+  autoPush?: boolean;
+}
+
+/** Encryption configuration for EncryptedSyncAdapter */
+export interface EncryptionConfig {
+  /** Environment variable name containing the passphrase */
+  passphraseEnvVar?: string;
+
+  /** Path to a key file (should have 600 permissions) */
+  keyfilePath?: string;
+
+  /** Direct passphrase - use only for testing */
+  passphrase?: string;
+
+  /** Number of PBKDF2 iterations (default: 100000) */
+  kdfIterations?: number;
+}
+
+/** Configuration for EncryptedSyncAdapter */
+export interface EncryptedSyncAdapterConfig extends EncryptionConfig {
+  /** Name suffix for the adapter (default: '-encrypted') */
+  nameSuffix?: string;
 }
 
 // ============================================================================
