@@ -167,6 +167,7 @@ const sessionManager = new SessionManager({
   dataPath: DATA_PATH,
   sessionTimeout: SESSION_TIMEOUT,
   onRemoveSession: (sessionId) => closeTransport(transports, sessionId),
+  apiKeysFilePath: API_KEYS_FILE,
 });
 
 // MCP endpoint (handles POST for requests and GET for SSE)
@@ -186,8 +187,8 @@ app.all('/mcp', authMiddleware, async (req: AuthenticatedRequest, res) => {
           return;
         }
 
-        // Create new session and transport
-        const session = sessionManager.getOrCreate(undefined, clientId);
+        // Create new session and transport (pass auth info for permission-based tools)
+        const session = sessionManager.getOrCreate(undefined, clientId, req.auth);
 
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => session.id,

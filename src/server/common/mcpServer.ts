@@ -55,6 +55,21 @@ import {
   WisdomGetSchema,
   WisdomSearchSchema,
   WisdomApplySchema,
+  // Multi-Agent Shared Memory Schemas
+  SharedMemorySetSchema,
+  SharedMemoryGetSchema,
+  SharedMemoryDeleteSchema,
+  SharedMemoryListSchema,
+  SharedMemorySearchSchema,
+  TeamSyncRequestSchema,
+  AgentMemoryReadSchema,
+  PermissionGrantSchema,
+  AuditQuerySchema,
+  // Invite Code Schemas
+  InviteCreateSchema,
+  InviteListSchema,
+  InviteGetSchema,
+  InviteRevokeSchema,
 } from '../tools.js';
 
 // Server instructions for Claude
@@ -91,11 +106,17 @@ cc-memory は Claude の持続的記憶システムです。以下のルール�
 - 過去の記憶と矛盾する新情報があれば、semantic_update で更新すること
 `.trim();
 
+import type { AuthInfo } from '../http/auth/types.js';
+
 export interface CreateMcpServerOptions {
   memoryManager: MemoryManager;
   storage: SqliteStorage;
   serverName?: string;
   serverVersion?: string;
+  /** Authentication info for the current user */
+  auth?: AuthInfo;
+  /** Path to API keys file for invite operations */
+  apiKeysFilePath?: string;
 }
 
 /**
@@ -107,9 +128,14 @@ export function createMcpServer(options: CreateMcpServerOptions): McpServer {
     storage,
     serverName = 'cc-memory',
     serverVersion = '1.0.0',
+    auth,
+    apiKeysFilePath,
   } = options;
 
-  const handlers = createToolHandlers(memoryManager, storage);
+  const handlers = createToolHandlers(memoryManager, storage, {
+    auth,
+    apiKeysFilePath,
+  });
 
   const server = new McpServer({
     name: serverName,
@@ -599,6 +625,144 @@ function registerTools(server: McpServer, handlers: ReturnType<typeof createTool
     WisdomApplySchema.shape,
     async (args) => {
       const result = handlers.wisdom_apply(args as z.infer<typeof WisdomApplySchema>);
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  // ============================================================================
+  // Shared Memory Tools (Multi-Agent)
+  // ============================================================================
+
+  server.tool(
+    'shared_memory_set',
+    'Store a value in the shared memory pool (accessible by team members)',
+    SharedMemorySetSchema.shape,
+    async (args) => {
+      const result = handlers.shared_memory_set(args as z.infer<typeof SharedMemorySetSchema>);
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    'shared_memory_get',
+    'Retrieve a value from the shared memory pool',
+    SharedMemoryGetSchema.shape,
+    async (args) => {
+      const result = handlers.shared_memory_get(args as z.infer<typeof SharedMemoryGetSchema>);
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    'shared_memory_delete',
+    'Delete a value from the shared memory pool',
+    SharedMemoryDeleteSchema.shape,
+    async (args) => {
+      const result = handlers.shared_memory_delete(args as z.infer<typeof SharedMemoryDeleteSchema>);
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    'shared_memory_list',
+    'List items in the shared memory pool',
+    SharedMemoryListSchema.shape,
+    async (args) => {
+      const result = handlers.shared_memory_list(args as z.infer<typeof SharedMemoryListSchema>);
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    'shared_memory_search',
+    'Search for items in the shared memory pool',
+    SharedMemorySearchSchema.shape,
+    async (args) => {
+      const result = handlers.shared_memory_search(args as z.infer<typeof SharedMemorySearchSchema>);
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    'team_sync_request',
+    'Request synchronization with team members',
+    TeamSyncRequestSchema.shape,
+    async (args) => {
+      const result = handlers.team_sync_request(args as z.infer<typeof TeamSyncRequestSchema>);
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    'agent_memory_read',
+    'Read another agent\'s memory (manager permission required)',
+    AgentMemoryReadSchema.shape,
+    async (args) => {
+      const result = handlers.agent_memory_read(args as z.infer<typeof AgentMemoryReadSchema>);
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    'permission_grant',
+    'Grant permission to another agent (manager permission required)',
+    PermissionGrantSchema.shape,
+    async (args) => {
+      const result = handlers.permission_grant(args as z.infer<typeof PermissionGrantSchema>);
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    'audit_query',
+    'Query the audit log for access history',
+    AuditQuerySchema.shape,
+    async (args) => {
+      const result = handlers.audit_query(args as z.infer<typeof AuditQuerySchema>);
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  // ============================================================================
+  // Invite Code Tools (Self-service Registration)
+  // ============================================================================
+
+  server.tool(
+    'invite_create',
+    'Create an invite code for new agents to self-register (manager only)',
+    InviteCreateSchema.shape,
+    async (args) => {
+      const result = handlers.invite_create(args as z.infer<typeof InviteCreateSchema>);
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    'invite_list',
+    'List all invite codes for your team (manager only)',
+    InviteListSchema.shape,
+    async (args) => {
+      const result = handlers.invite_list(args as z.infer<typeof InviteListSchema>);
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    'invite_get',
+    'Get details of a specific invite code (manager only)',
+    InviteGetSchema.shape,
+    async (args) => {
+      const result = handlers.invite_get(args as z.infer<typeof InviteGetSchema>);
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    'invite_revoke',
+    'Revoke an invite code to prevent further use (manager only)',
+    InviteRevokeSchema.shape,
+    async (args) => {
+      const result = handlers.invite_revoke(args as z.infer<typeof InviteRevokeSchema>);
       return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
     }
   );

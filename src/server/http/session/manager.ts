@@ -8,12 +8,14 @@ import { join } from 'path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { MemoryManager } from '../../../memory/MemoryManager.js';
 import { createMcpServer } from '../../common/mcpServer.js';
+import type { AuthInfo } from '../auth/types.js';
 
 export interface Session {
   id: string;
   clientId: string;
   mcpServer: McpServer;
   memoryManager: MemoryManager;
+  auth?: AuthInfo;
   createdAt: number;
   lastAccess: number;
 }
@@ -27,13 +29,15 @@ export interface SessionManagerConfig {
   cleanupInterval?: number;
   /** Callback invoked after a session is removed */
   onRemoveSession?: (sessionId: string) => void | Promise<void>;
+  /** Path to API keys file for invite code operations */
+  apiKeysFilePath?: string;
 }
 
 export class SessionManager {
   private sessions: Map<string, Session> = new Map();
   private clientSessions: Map<string, Set<string>> = new Map();
   private clientManagers: Map<string, MemoryManager> = new Map();
-  private readonly config: Required<SessionManagerConfig>;
+  private readonly config: Required<Omit<SessionManagerConfig, 'apiKeysFilePath'>> & Pick<SessionManagerConfig, 'apiKeysFilePath'>;
   private cleanupTimer?: ReturnType<typeof setInterval>;
 
   constructor(config: SessionManagerConfig) {
@@ -42,6 +46,7 @@ export class SessionManager {
       sessionTimeout: config.sessionTimeout ?? 30 * 60 * 1000, // 30 minutes
       cleanupInterval: config.cleanupInterval ?? 5 * 60 * 1000, // 5 minutes
       onRemoveSession: config.onRemoveSession ?? (() => undefined),
+      apiKeysFilePath: config.apiKeysFilePath,
     };
 
     // Start cleanup timer
@@ -56,13 +61,17 @@ export class SessionManager {
   /**
    * Get or create a session for a client
    */
-  getOrCreate(sessionId: string | undefined, clientId: string): Session {
+  getOrCreate(sessionId: string | undefined, clientId: string, auth?: AuthInfo): Session {
     // Try to get existing session
     if (sessionId && this.sessions.has(sessionId)) {
       const session = this.sessions.get(sessionId)!;
       // Verify client ID matches
       if (session.clientId === clientId) {
         session.lastAccess = Date.now();
+        // Update auth info if provided (in case permissions changed)
+        if (auth) {
+          session.auth = auth;
+        }
         return session;
       }
       // Client ID mismatch - create new session
@@ -86,6 +95,8 @@ export class SessionManager {
       memoryManager,
       storage: memoryManager.getStorage(),
       serverName: `cc-memory-${clientId}`,
+      auth,
+      apiKeysFilePath: this.config.apiKeysFilePath,
     });
 
     const session: Session = {
@@ -93,6 +104,7 @@ export class SessionManager {
       clientId,
       mcpServer,
       memoryManager,
+      auth,
       createdAt: Date.now(),
       lastAccess: Date.now(),
     };
