@@ -242,6 +242,89 @@ export interface PermissionCheckResult {
 }
 
 // ============================================================================
+// Invite Code System
+// ============================================================================
+
+/**
+ * Invite code for self-service registration
+ */
+export interface InviteCode {
+  /** Unique invite code (e.g., "inv_abc123...") */
+  code: string;
+  /** Team this invite belongs to */
+  teamId: string;
+  /** Permission level granted to registering agents */
+  permissionLevel: PermissionLevel;
+  /** Custom scopes (if not using defaults) */
+  scopes?: string[];
+  /** Manager ID who created this invite */
+  createdBy: string;
+  /** Creation timestamp */
+  createdAt: number;
+  /** Expiration timestamp (null = never expires) */
+  expiresAt: number | null;
+  /** Maximum number of uses (null = unlimited) */
+  maxUses: number | null;
+  /** Current use count */
+  useCount: number;
+  /** Whether the invite is active */
+  active: boolean;
+  /** Optional description/note */
+  description?: string;
+  /** IDs of agents created with this invite */
+  usedBy: string[];
+}
+
+/**
+ * Request to create an invite code
+ */
+export interface CreateInviteRequest {
+  /** Permission level for new agents */
+  level?: PermissionLevel;
+  /** Maximum uses (default: unlimited) */
+  maxUses?: number | null;
+  /** Expiration in hours (default: 24h, null = never) */
+  expiresInHours?: number | null;
+  /** Description/note */
+  description?: string;
+}
+
+/**
+ * Request to register with an invite code
+ */
+export interface RegisterRequest {
+  /** The invite code */
+  inviteCode: string;
+  /** Desired client ID */
+  clientId: string;
+  /** Optional metadata */
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Response from registration
+ */
+export interface RegisterResponse {
+  success: boolean;
+  apiKey?: string;
+  clientId?: string;
+  team?: string;
+  permissionLevel?: PermissionLevel;
+  scopes?: string[];
+  error?: string;
+}
+
+/**
+ * Updated API keys file schema (v2.1 with invites)
+ */
+export interface ApiKeysFileV2_1 {
+  version: '2.0';  // Keep as 2.0 for backwards compatibility
+  teams: Record<string, TeamConfig>;
+  keys: Record<string, ApiKeyInfoV2>;
+  invites?: Record<string, InviteCode>;
+}
+
+// ============================================================================
 // Auth Mode
 // ============================================================================
 

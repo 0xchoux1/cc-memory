@@ -17,8 +17,15 @@ import {
   createApiKeyAuth,
   createNoAuth,
   loadApiKeysFromFile,
+  loadInviteCodes,
+  useInviteCode,
+  validateInviteCode,
+  createInviteCode,
+  listInviteCodes,
+  getInviteCode,
+  revokeInviteCode,
 } from './server/http/auth/apiKey.js';
-import type { AuthenticatedRequest } from './server/http/auth/types.js';
+import type { AuthenticatedRequest, RegisterRequest, CreateInviteRequest } from './server/http/auth/types.js';
 import {
   createHelmetMiddleware,
   createHostValidation,
@@ -26,7 +33,7 @@ import {
   createCorsMiddleware,
   createRequestLogger,
 } from './server/http/middleware/security.js';
-import { createRateLimiter } from './server/http/middleware/rateLimit.js';
+import { createRateLimiter, createStrictRateLimiter } from './server/http/middleware/rateLimit.js';
 import { WebSocketSyncServer } from './server/websocket/SyncServer.js';
 
 // Configuration from environment
@@ -68,6 +75,7 @@ app.use(createRateLimiter({ windowMs: 60000, max: 100 }));
 
 // Authentication
 const apiKeyConfig = loadApiKeysFromFile(API_KEYS_FILE);
+loadInviteCodes(API_KEYS_FILE);  // Load invite codes from same file
 const authMiddleware = AUTH_MODE === 'none'
   ? createNoAuth()
   : createApiKeyAuth(apiKeyConfig);
@@ -319,6 +327,312 @@ app.all('/mcp', authMiddleware, async (req: AuthenticatedRequest, res) => {
         message: 'Internal server error',
       },
       id: null,
+    });
+  }
+});
+
+// Self-service registration endpoint
+app.post('/register', createStrictRateLimiter({ windowMs: 60000, max: 10 }), (req, res) => {
+  try {
+    const body = req.body as RegisterRequest;
+
+    // Validate request
+    if (!body.inviteCode || typeof body.inviteCode !== 'string') {
+      res.status(400).json({
+        success: false,
+        error: 'inviteCode is required',
+      });
+      return;
+    }
+
+    if (!body.clientId || typeof body.clientId !== 'string') {
+      res.status(400).json({
+        success: false,
+        error: 'clientId is required',
+      });
+      return;
+    }
+
+    // Validate clientId format (alphanumeric, hyphens, underscores)
+    if (!/^[a-zA-Z0-9_-]{3,64}$/.test(body.clientId)) {
+      res.status(400).json({
+        success: false,
+        error: 'clientId must be 3-64 characters, alphanumeric with hyphens and underscores only',
+      });
+      return;
+    }
+
+    // First validate the invite code
+    const validation = validateInviteCode(body.inviteCode);
+    if (!validation.valid) {
+      res.status(400).json({
+        success: false,
+        error: validation.error,
+      });
+      return;
+    }
+
+    // Use the invite code to register
+    const result = useInviteCode(body.inviteCode, body, apiKeyConfig, API_KEYS_FILE);
+
+    if (!result.success) {
+      res.status(400).json(result);
+      return;
+    }
+
+    console.log(`[Register] New agent registered: ${result.clientId} (team: ${result.team}, level: ${result.permissionLevel})`);
+
+    res.status(201).json(result);
+  } catch (error) {
+    console.error('[Register] Error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+    });
+  }
+});
+
+// Invite code validation endpoint (check if code is valid without using it)
+app.get('/invite/:code', createStrictRateLimiter({ windowMs: 60000, max: 20 }), (req, res) => {
+  const code = req.params.code as string;
+  const validation = validateInviteCode(code);
+
+  if (!validation.valid) {
+    res.status(400).json({
+      valid: false,
+      error: validation.error,
+    });
+    return;
+  }
+
+  // Return limited info about the invite (don't expose sensitive details)
+  const invite = validation.invite!;
+  res.json({
+    valid: true,
+    teamId: invite.teamId,
+    permissionLevel: invite.permissionLevel,
+    remainingUses: invite.maxUses != null ? invite.maxUses - invite.useCount : null,
+    expiresAt: invite.expiresAt,
+  });
+});
+
+// ============================================================================
+// Invite Management API (Manager only)
+// ============================================================================
+
+// Create an invite code
+app.post('/api/invites', authMiddleware, (req: AuthenticatedRequest, res) => {
+  try {
+    // Check manager permission
+    if (req.auth?.permissionLevel !== 'manager') {
+      res.status(403).json({
+        success: false,
+        error: 'Manager permission required to create invites',
+      });
+      return;
+    }
+
+    if (!req.auth.team) {
+      res.status(400).json({
+        success: false,
+        error: 'Team membership required to create invites',
+      });
+      return;
+    }
+
+    const body = req.body as CreateInviteRequest;
+
+    const invite = createInviteCode(
+      req.auth.team,
+      req.auth.clientId,
+      {
+        level: body.level,
+        maxUses: body.maxUses,
+        expiresInHours: body.expiresInHours,
+        description: body.description,
+      },
+      API_KEYS_FILE
+    );
+
+    console.log(`[Invite] Created by ${req.auth.clientId}: ${invite.code} (team: ${invite.teamId}, level: ${invite.permissionLevel})`);
+
+    res.status(201).json({
+      success: true,
+      invite: {
+        code: invite.code,
+        teamId: invite.teamId,
+        permissionLevel: invite.permissionLevel,
+        expiresAt: invite.expiresAt,
+        maxUses: invite.maxUses,
+        description: invite.description,
+      },
+      registrationUrl: `POST /register with {"inviteCode": "${invite.code}", "clientId": "your-agent-id"}`,
+    });
+  } catch (error) {
+    console.error('[Invite] Error creating invite:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to create invite',
+    });
+  }
+});
+
+// List invite codes for team
+app.get('/api/invites', authMiddleware, (req: AuthenticatedRequest, res) => {
+  try {
+    // Check manager permission
+    if (req.auth?.permissionLevel !== 'manager') {
+      res.status(403).json({
+        success: false,
+        error: 'Manager permission required',
+      });
+      return;
+    }
+
+    if (!req.auth.team) {
+      res.status(400).json({
+        success: false,
+        error: 'Team membership required',
+      });
+      return;
+    }
+
+    const includeExpired = req.query.include_expired === 'true';
+    const invites = listInviteCodes(req.auth.team, includeExpired);
+
+    const sanitizedInvites = invites.map(inv => ({
+      code: inv.code,
+      permissionLevel: inv.permissionLevel,
+      createdBy: inv.createdBy,
+      createdAt: inv.createdAt,
+      expiresAt: inv.expiresAt,
+      maxUses: inv.maxUses,
+      useCount: inv.useCount,
+      active: inv.active,
+      description: inv.description,
+      usedBy: inv.usedBy,
+    }));
+
+    res.json({
+      success: true,
+      invites: sanitizedInvites,
+      count: sanitizedInvites.length,
+    });
+  } catch (error) {
+    console.error('[Invite] Error listing invites:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to list invites',
+    });
+  }
+});
+
+// Get specific invite details
+app.get('/api/invites/:code', authMiddleware, (req: AuthenticatedRequest, res) => {
+  try {
+    // Check manager permission
+    if (req.auth?.permissionLevel !== 'manager') {
+      res.status(403).json({
+        success: false,
+        error: 'Manager permission required',
+      });
+      return;
+    }
+
+    const inviteCode = req.params.code as string;
+    const invite = getInviteCode(inviteCode);
+    if (!invite) {
+      res.status(404).json({
+        success: false,
+        error: 'Invite code not found',
+      });
+      return;
+    }
+
+    // Verify team ownership
+    if (invite.teamId !== req.auth.team) {
+      res.status(403).json({
+        success: false,
+        error: 'Invite belongs to a different team',
+      });
+      return;
+    }
+
+    res.json({
+      success: true,
+      invite: {
+        code: invite.code,
+        teamId: invite.teamId,
+        permissionLevel: invite.permissionLevel,
+        createdBy: invite.createdBy,
+        createdAt: invite.createdAt,
+        expiresAt: invite.expiresAt,
+        maxUses: invite.maxUses,
+        useCount: invite.useCount,
+        active: invite.active,
+        description: invite.description,
+        usedBy: invite.usedBy,
+      },
+    });
+  } catch (error) {
+    console.error('[Invite] Error getting invite:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get invite',
+    });
+  }
+});
+
+// Revoke an invite code
+app.delete('/api/invites/:code', authMiddleware, (req: AuthenticatedRequest, res) => {
+  try {
+    // Check manager permission
+    if (req.auth?.permissionLevel !== 'manager') {
+      res.status(403).json({
+        success: false,
+        error: 'Manager permission required',
+      });
+      return;
+    }
+
+    const inviteCode = req.params.code as string;
+    const invite = getInviteCode(inviteCode);
+    if (!invite) {
+      res.status(404).json({
+        success: false,
+        error: 'Invite code not found',
+      });
+      return;
+    }
+
+    // Verify team ownership
+    if (invite.teamId !== req.auth.team) {
+      res.status(403).json({
+        success: false,
+        error: 'Invite belongs to a different team',
+      });
+      return;
+    }
+
+    const success = revokeInviteCode(inviteCode, API_KEYS_FILE);
+
+    if (success) {
+      console.log(`[Invite] Revoked by ${req.auth.clientId}: ${inviteCode}`);
+      res.json({
+        success: true,
+        message: 'Invite code revoked',
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: 'Failed to revoke invite',
+      });
+    }
+  } catch (error) {
+    console.error('[Invite] Error revoking invite:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to revoke invite',
     });
   }
 });

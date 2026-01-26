@@ -6,6 +6,7 @@ import { z } from 'zod';
 import * as fs from 'fs';
 import type { MemoryManager } from '../memory/MemoryManager.js';
 import type { SqliteStorage } from '../storage/SqliteStorage.js';
+import type { AuthInfo } from './http/auth/types.js';
 
 // Schema definitions
 export const WorkingSetSchema = z.object({
@@ -515,8 +516,54 @@ export const AuditQuerySchema = z.object({
   limit: z.number().optional().default(100).describe('Maximum results'),
 });
 
+// ============================================================================
+// Invite Code Schemas (Self-service Registration)
+// ============================================================================
+
+export const InviteCreateSchema = z.object({
+  level: z.enum(['manager', 'worker', 'observer']).optional().default('worker')
+    .describe('Permission level for new agents (default: worker)'),
+  max_uses: z.number().nullable().optional()
+    .describe('Maximum number of uses (null = unlimited)'),
+  expires_in_hours: z.number().nullable().optional().default(24)
+    .describe('Expiration in hours (null = never expires, default: 24)'),
+  description: z.string().optional()
+    .describe('Description/note for this invite'),
+});
+
+export const InviteListSchema = z.object({
+  include_expired: z.boolean().optional().default(false)
+    .describe('Include expired/exhausted invites'),
+});
+
+export const InviteRevokeSchema = z.object({
+  code: z.string().describe('Invite code to revoke'),
+});
+
+export const InviteGetSchema = z.object({
+  code: z.string().describe('Invite code to retrieve'),
+});
+
+// Import invite functions
+import {
+  createInviteCode,
+  listInviteCodes,
+  getInviteCode,
+  revokeInviteCode,
+} from './http/auth/apiKey.js';
+
+// Context for tool execution
+export interface ToolContext {
+  auth?: AuthInfo;
+  apiKeysFilePath?: string;
+}
+
 // Tool handler factory
-export function createToolHandlers(memoryManager: MemoryManager, storage: SqliteStorage) {
+export function createToolHandlers(
+  memoryManager: MemoryManager,
+  storage: SqliteStorage,
+  context: ToolContext = {}
+) {
   return {
     // Working Memory Tools
     working_set: (args: z.infer<typeof WorkingSetSchema>) => {
@@ -1120,6 +1167,138 @@ export function createToolHandlers(memoryManager: MemoryManager, storage: Sqlite
       });
       return { success: true, entries, count: entries.length };
     },
+
+    // ============================================================================
+    // Invite Code Tools (Self-service Registration)
+    // ============================================================================
+
+    invite_create: (args: z.infer<typeof InviteCreateSchema>) => {
+      // Check if caller has manager permission
+      if (!context.auth) {
+        return { success: false, error: 'Authentication required' };
+      }
+      if (context.auth.permissionLevel !== 'manager') {
+        return { success: false, error: 'Manager permission required to create invites' };
+      }
+      if (!context.auth.team) {
+        return { success: false, error: 'Team membership required to create invites' };
+      }
+
+      const invite = createInviteCode(
+        context.auth.team,
+        context.auth.clientId,
+        {
+          level: args.level,
+          maxUses: args.max_uses,
+          expiresInHours: args.expires_in_hours,
+          description: args.description,
+        },
+        context.apiKeysFilePath
+      );
+
+      return {
+        success: true,
+        invite: {
+          code: invite.code,
+          teamId: invite.teamId,
+          permissionLevel: invite.permissionLevel,
+          expiresAt: invite.expiresAt,
+          maxUses: invite.maxUses,
+          description: invite.description,
+        },
+        message: 'Share this invite code with new agents. They can register at POST /register',
+      };
+    },
+
+    invite_list: (args: z.infer<typeof InviteListSchema>) => {
+      // Check if caller has manager permission
+      if (!context.auth) {
+        return { success: false, error: 'Authentication required' };
+      }
+      if (context.auth.permissionLevel !== 'manager') {
+        return { success: false, error: 'Manager permission required to list invites' };
+      }
+      if (!context.auth.team) {
+        return { success: false, error: 'Team membership required' };
+      }
+
+      const invites = listInviteCodes(context.auth.team, args.include_expired);
+
+      // Return sanitized invite info
+      const sanitizedInvites = invites.map(inv => ({
+        code: inv.code,
+        permissionLevel: inv.permissionLevel,
+        createdAt: inv.createdAt,
+        expiresAt: inv.expiresAt,
+        maxUses: inv.maxUses,
+        useCount: inv.useCount,
+        active: inv.active,
+        description: inv.description,
+        usedBy: inv.usedBy,
+      }));
+
+      return { success: true, invites: sanitizedInvites, count: sanitizedInvites.length };
+    },
+
+    invite_get: (args: z.infer<typeof InviteGetSchema>) => {
+      // Check if caller has manager permission
+      if (!context.auth) {
+        return { success: false, error: 'Authentication required' };
+      }
+      if (context.auth.permissionLevel !== 'manager') {
+        return { success: false, error: 'Manager permission required' };
+      }
+
+      const invite = getInviteCode(args.code);
+      if (!invite) {
+        return { success: false, error: 'Invite code not found' };
+      }
+
+      // Verify caller owns this invite
+      if (invite.teamId !== context.auth.team) {
+        return { success: false, error: 'Invite belongs to a different team' };
+      }
+
+      return {
+        success: true,
+        invite: {
+          code: invite.code,
+          teamId: invite.teamId,
+          permissionLevel: invite.permissionLevel,
+          createdBy: invite.createdBy,
+          createdAt: invite.createdAt,
+          expiresAt: invite.expiresAt,
+          maxUses: invite.maxUses,
+          useCount: invite.useCount,
+          active: invite.active,
+          description: invite.description,
+          usedBy: invite.usedBy,
+        },
+      };
+    },
+
+    invite_revoke: (args: z.infer<typeof InviteRevokeSchema>) => {
+      // Check if caller has manager permission
+      if (!context.auth) {
+        return { success: false, error: 'Authentication required' };
+      }
+      if (context.auth.permissionLevel !== 'manager') {
+        return { success: false, error: 'Manager permission required to revoke invites' };
+      }
+
+      const invite = getInviteCode(args.code);
+      if (!invite) {
+        return { success: false, error: 'Invite code not found' };
+      }
+
+      // Verify caller owns this invite
+      if (invite.teamId !== context.auth.team) {
+        return { success: false, error: 'Invite belongs to a different team' };
+      }
+
+      const success = revokeInviteCode(args.code, context.apiKeysFilePath);
+      return { success, message: success ? 'Invite code revoked' : 'Failed to revoke invite' };
+    },
   };
 }
 
@@ -1375,5 +1554,26 @@ export const toolDefinitions = [
     name: 'audit_query',
     description: 'Query the audit log for access history',
     inputSchema: AuditQuerySchema,
+  },
+  // Invite Code Tools (Self-service Registration)
+  {
+    name: 'invite_create',
+    description: 'Create an invite code for new agents to self-register (manager only). Share the code with agents who can then POST to /register endpoint.',
+    inputSchema: InviteCreateSchema,
+  },
+  {
+    name: 'invite_list',
+    description: 'List all invite codes for your team (manager only)',
+    inputSchema: InviteListSchema,
+  },
+  {
+    name: 'invite_get',
+    description: 'Get details of a specific invite code (manager only)',
+    inputSchema: InviteGetSchema,
+  },
+  {
+    name: 'invite_revoke',
+    description: 'Revoke an invite code to prevent further use (manager only)',
+    inputSchema: InviteRevokeSchema,
   },
 ];

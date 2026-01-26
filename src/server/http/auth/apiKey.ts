@@ -406,3 +406,316 @@ export function listTeamAgents(config: ApiKeyConfig, teamId: string): ApiKeyInfo
   }
   return agents;
 }
+
+// ============================================================================
+// Invite Code Management
+// ============================================================================
+
+import type {
+  InviteCode,
+  CreateInviteRequest,
+  RegisterRequest,
+  RegisterResponse,
+} from './types.js';
+
+/** In-memory storage for invite codes (also persisted to file) */
+const inviteCodes = new Map<string, InviteCode>();
+
+/**
+ * Generate a unique invite code
+ */
+export function generateInviteCode(): string {
+  const randomPart = createHash('sha256')
+    .update(Math.random().toString() + Date.now().toString() + Math.random().toString())
+    .digest('hex')
+    .slice(0, 24);
+  return `inv_${randomPart}`;
+}
+
+/**
+ * Load invite codes from file
+ */
+export function loadInviteCodes(filePath: string): void {
+  if (!existsSync(filePath)) {
+    return;
+  }
+
+  try {
+    const content = readFileSync(filePath, 'utf-8');
+    const data = JSON.parse(content);
+
+    if (data.invites && typeof data.invites === 'object') {
+      for (const [code, invite] of Object.entries(data.invites)) {
+        inviteCodes.set(code, invite as InviteCode);
+      }
+      console.log(`[Auth] Loaded ${inviteCodes.size} invite code(s)`);
+    }
+  } catch (error) {
+    console.error(`[Auth] Error loading invite codes:`, error);
+  }
+}
+
+/**
+ * Save invite codes to file (merged with existing api-keys.json)
+ */
+export function saveInviteCodes(filePath: string): void {
+  let data: Record<string, unknown> = {};
+
+  if (existsSync(filePath)) {
+    try {
+      const content = readFileSync(filePath, 'utf-8');
+      data = JSON.parse(content);
+    } catch {
+      // Start fresh if file is corrupted
+    }
+  }
+
+  data.invites = Object.fromEntries(inviteCodes);
+
+  writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+}
+
+/**
+ * Create a new invite code
+ */
+export function createInviteCode(
+  teamId: string,
+  createdBy: string,
+  options: CreateInviteRequest = {},
+  apiKeysFilePath?: string
+): InviteCode {
+  const code = generateInviteCode();
+  const now = Date.now();
+
+  const invite: InviteCode = {
+    code,
+    teamId,
+    permissionLevel: options.level ?? 'worker',
+    createdBy,
+    createdAt: now,
+    expiresAt: options.expiresInHours != null
+      ? now + options.expiresInHours * 60 * 60 * 1000
+      : null,
+    maxUses: options.maxUses ?? null,
+    useCount: 0,
+    active: true,
+    description: options.description,
+    usedBy: [],
+  };
+
+  inviteCodes.set(code, invite);
+
+  // Persist to file
+  if (apiKeysFilePath) {
+    saveInviteCodes(apiKeysFilePath);
+  }
+
+  return invite;
+}
+
+/**
+ * List invite codes for a team (manager view)
+ */
+export function listInviteCodes(teamId: string, includeExpired = false): InviteCode[] {
+  const result: InviteCode[] = [];
+  const now = Date.now();
+
+  for (const invite of inviteCodes.values()) {
+    if (invite.teamId !== teamId) continue;
+
+    const isExpired = invite.expiresAt != null && invite.expiresAt < now;
+    const isExhausted = invite.maxUses != null && invite.useCount >= invite.maxUses;
+
+    if (!includeExpired && (isExpired || isExhausted || !invite.active)) {
+      continue;
+    }
+
+    result.push(invite);
+  }
+
+  return result;
+}
+
+/**
+ * Get an invite code by its code string
+ */
+export function getInviteCode(code: string): InviteCode | undefined {
+  return inviteCodes.get(code);
+}
+
+/**
+ * Validate an invite code for use
+ */
+export function validateInviteCode(code: string): {
+  valid: boolean;
+  invite?: InviteCode;
+  error?: string;
+} {
+  const invite = inviteCodes.get(code);
+
+  if (!invite) {
+    return { valid: false, error: 'Invalid invite code' };
+  }
+
+  if (!invite.active) {
+    return { valid: false, error: 'Invite code has been revoked' };
+  }
+
+  const now = Date.now();
+  if (invite.expiresAt != null && invite.expiresAt < now) {
+    return { valid: false, error: 'Invite code has expired' };
+  }
+
+  if (invite.maxUses != null && invite.useCount >= invite.maxUses) {
+    return { valid: false, error: 'Invite code has reached maximum uses' };
+  }
+
+  return { valid: true, invite };
+}
+
+/**
+ * Use an invite code to register a new agent
+ */
+export function useInviteCode(
+  code: string,
+  request: RegisterRequest,
+  config: ApiKeyConfig,
+  apiKeysFilePath: string
+): RegisterResponse {
+  // Validate the invite
+  const validation = validateInviteCode(code);
+  if (!validation.valid || !validation.invite) {
+    return { success: false, error: validation.error };
+  }
+
+  const invite = validation.invite;
+
+  // Check if clientId already exists
+  if (getApiKeyByClientId(config, request.clientId)) {
+    return { success: false, error: 'Client ID already exists' };
+  }
+
+  // Get team config
+  const teamConfig = config.teams.get(invite.teamId);
+  if (!teamConfig) {
+    return { success: false, error: 'Team not found' };
+  }
+
+  // Create the API key based on permission level
+  let rawKey: string;
+  let keyInfo: ApiKeyInfoV2;
+
+  switch (invite.permissionLevel) {
+    case 'manager': {
+      const result = createManagerKey(request.clientId, invite.teamId, []);
+      rawKey = result.rawKey;
+      keyInfo = result.keyInfo;
+      break;
+    }
+    case 'observer': {
+      const result = createObserverKey(
+        request.clientId,
+        invite.teamId,
+        teamConfig.managerId
+      );
+      rawKey = result.rawKey;
+      keyInfo = result.keyInfo;
+      break;
+    }
+    case 'worker':
+    default: {
+      const result = createWorkerKey(
+        request.clientId,
+        invite.teamId,
+        teamConfig.managerId
+      );
+      rawKey = result.rawKey;
+      keyInfo = result.keyInfo;
+      break;
+    }
+  }
+
+  // Apply custom scopes if specified
+  if (invite.scopes && invite.scopes.length > 0) {
+    keyInfo.scopes = invite.scopes;
+  }
+
+  // Add metadata if provided
+  if (request.metadata) {
+    keyInfo.metadata = request.metadata;
+  }
+
+  // Add the new key to config
+  addApiKey(config, rawKey, keyInfo);
+
+  // Update manager's managedAgents list if not a manager
+  if (invite.permissionLevel !== 'manager') {
+    for (const info of config.keys.values()) {
+      if (info.clientId === teamConfig.managerId && info.managedAgents) {
+        info.managedAgents.push(request.clientId);
+        break;
+      }
+    }
+  }
+
+  // Update invite usage
+  invite.useCount++;
+  invite.usedBy.push(request.clientId);
+
+  // Save everything
+  saveApiKeysToFile(apiKeysFilePath, config);
+  saveInviteCodes(apiKeysFilePath);
+
+  return {
+    success: true,
+    apiKey: rawKey,
+    clientId: request.clientId,
+    team: invite.teamId,
+    permissionLevel: invite.permissionLevel,
+    scopes: keyInfo.scopes,
+  };
+}
+
+/**
+ * Revoke an invite code
+ */
+export function revokeInviteCode(code: string, apiKeysFilePath?: string): boolean {
+  const invite = inviteCodes.get(code);
+  if (!invite) {
+    return false;
+  }
+
+  invite.active = false;
+
+  if (apiKeysFilePath) {
+    saveInviteCodes(apiKeysFilePath);
+  }
+
+  return true;
+}
+
+/**
+ * Delete an invite code entirely
+ */
+export function deleteInviteCode(code: string, apiKeysFilePath?: string): boolean {
+  const deleted = inviteCodes.delete(code);
+
+  if (deleted && apiKeysFilePath) {
+    saveInviteCodes(apiKeysFilePath);
+  }
+
+  return deleted;
+}
+
+/**
+ * Get invite codes created by a specific manager
+ */
+export function getInvitesByCreator(createdBy: string): InviteCode[] {
+  const result: InviteCode[] = [];
+  for (const invite of inviteCodes.values()) {
+    if (invite.createdBy === createdBy) {
+      result.push(invite);
+    }
+  }
+  return result;
+}

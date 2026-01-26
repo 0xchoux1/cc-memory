@@ -87,7 +87,9 @@ This creates:
 
 Save the generated API key for the manager agent.
 
-### 2. Add Agents
+### 2. Add Agents (Two Methods)
+
+#### Method A: CLI (Local access required)
 
 ```bash
 # Add a worker agent
@@ -96,6 +98,62 @@ cc-memory-cli agent add --team-id project-alpha --client-id worker-001 --level w
 # Add an observer agent
 cc-memory-cli agent add --team-id project-alpha --client-id observer-001 --level observer
 ```
+
+#### Method B: Self-Service Registration (No SSH required)
+
+Managers can create invite codes that agents use to self-register via HTTP:
+
+**Step 1: Manager creates an invite code**
+```bash
+curl -X POST "http://server:3000/api/invites" \
+  -H "Authorization: Bearer MANAGER_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "level": "worker",
+    "maxUses": 10,
+    "expiresInHours": 24,
+    "description": "Invite for project team workers"
+  }'
+```
+
+Response:
+```json
+{
+  "success": true,
+  "invite": {
+    "code": "inv_abc123...",
+    "teamId": "project-alpha",
+    "permissionLevel": "worker",
+    "expiresAt": 1706000000000,
+    "maxUses": 10
+  },
+  "registrationUrl": "POST /register with {\"inviteCode\": \"inv_abc123...\", \"clientId\": \"your-agent-id\"}"
+}
+```
+
+**Step 2: New agent registers with the invite code**
+```bash
+curl -X POST "http://server:3000/register" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "inviteCode": "inv_abc123...",
+    "clientId": "new-worker-001"
+  }'
+```
+
+Response:
+```json
+{
+  "success": true,
+  "apiKey": "ccm_xyz789...",
+  "clientId": "new-worker-001",
+  "team": "project-alpha",
+  "permissionLevel": "worker",
+  "scopes": ["memory:read", "memory:write", "memory:share:read", "memory:share:write"]
+}
+```
+
+**Step 3: Agent configures cc-memory with the received API key**
 
 ### 3. Configure Claude Code
 
@@ -439,5 +497,37 @@ DEBUG=cc-memory:* npm run start:http
 ```
 
 ## API Reference
+
+### Self-Service Registration Endpoints
+
+| Endpoint | Method | Auth | Description |
+|----------|--------|------|-------------|
+| `/register` | POST | None | Register new agent with invite code |
+| `/invite/:code` | GET | None | Validate invite code (public) |
+| `/api/invites` | POST | Manager | Create new invite code |
+| `/api/invites` | GET | Manager | List team's invite codes |
+| `/api/invites/:code` | GET | Manager | Get invite details |
+| `/api/invites/:code` | DELETE | Manager | Revoke invite code |
+
+### Invite Code Options
+
+When creating an invite code:
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `level` | string | `"worker"` | Permission level: `manager`, `worker`, or `observer` |
+| `maxUses` | number | `null` | Max registrations (null = unlimited) |
+| `expiresInHours` | number | `24` | Hours until expiration (null = never) |
+| `description` | string | - | Optional note for tracking |
+
+### Registration Request
+
+```json
+{
+  "inviteCode": "inv_...",     // Required: The invite code
+  "clientId": "my-agent-001",  // Required: Unique agent ID (3-64 chars, alphanumeric with - and _)
+  "metadata": {}               // Optional: Custom metadata
+}
+```
 
 See the main README.md for complete tool documentation.
