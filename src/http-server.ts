@@ -6,6 +6,7 @@
 
 import express, { type Response } from 'express';
 import { createServer } from 'http';
+import { WebSocketServer } from 'ws';
 import { homedir } from 'os';
 import { join } from 'path';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -26,6 +27,7 @@ import {
   createRequestLogger,
 } from './server/http/middleware/security.js';
 import { createRateLimiter } from './server/http/middleware/rateLimit.js';
+import { WebSocketSyncServer } from './server/websocket/SyncServer.js';
 
 // Configuration from environment
 const PORT = parseInt(process.env.CC_MEMORY_PORT || '3000', 10);
@@ -37,6 +39,11 @@ const ALLOWED_HOSTS = (process.env.CC_MEMORY_ALLOWED_HOSTS || '127.0.0.1,localho
 const CORS_ORIGINS = process.env.CC_MEMORY_CORS_ORIGINS?.split(',');
 const REQUIRE_HTTPS = process.env.CC_MEMORY_REQUIRE_HTTPS === 'true';
 const SESSION_TIMEOUT = parseInt(process.env.CC_MEMORY_SESSION_TIMEOUT || '1800000', 10); // 30 minutes
+
+// WebSocket configuration
+const WS_ENABLED = process.env.CC_MEMORY_WS_ENABLED !== 'false'; // Default enabled
+const WS_PING_INTERVAL = parseInt(process.env.CC_MEMORY_WS_PING_INTERVAL || '30000', 10);
+const WS_CONNECTION_TIMEOUT = parseInt(process.env.CC_MEMORY_WS_CONNECTION_TIMEOUT || '60000', 10);
 
 // Initialize Express app
 const app = express();
@@ -60,11 +67,17 @@ app.use(createRequestLogger());
 app.use(createRateLimiter({ windowMs: 60000, max: 100 }));
 
 // Authentication
+const apiKeyConfig = loadApiKeysFromFile(API_KEYS_FILE);
 const authMiddleware = AUTH_MODE === 'none'
   ? createNoAuth()
-  : createApiKeyAuth({ keys: loadApiKeysFromFile(API_KEYS_FILE) });
+  : createApiKeyAuth(apiKeyConfig);
 
 function hasScopes(req: AuthenticatedRequest, res: Response, scopes: string[]): boolean {
+  // Check for wildcard scope
+  if (req.auth?.scopes?.includes('memory:*')) {
+    return true;
+  }
+
   const missing = scopes.filter(scope => !req.auth?.scopes?.includes(scope));
   if (missing.length > 0) {
     res.status(403).json({
@@ -137,6 +150,9 @@ function requiredScopesForRequest(body: unknown): string[] {
 
 // Map to store transports for each session
 const transports = new Map<string, StreamableHTTPServerTransport>();
+
+// WebSocket Sync Server (initialized later if enabled)
+let wsSyncServer: WebSocketSyncServer | undefined;
 
 // Session manager
 const sessionManager = new SessionManager({
@@ -309,18 +325,37 @@ app.all('/mcp', authMiddleware, async (req: AuthenticatedRequest, res) => {
 
 // Health check endpoint
 app.get('/health', (_req, res) => {
-  res.json({
+  const healthData: Record<string, unknown> = {
     status: 'healthy',
     version: '1.0.0',
     sessions: sessionManager.getSessionCount(),
     clients: sessionManager.getClientCount(),
     uptime: process.uptime(),
-  });
+  };
+
+  // Add WebSocket stats if enabled
+  if (WS_ENABLED && wsSyncServer) {
+    healthData.websocket = {
+      enabled: true,
+      connectedClients: wsSyncServer.getConnectedClients().length,
+      rooms: wsSyncServer.getRooms().length,
+    };
+  } else {
+    healthData.websocket = { enabled: false };
+  }
+
+  res.json(healthData);
 });
 
 // Graceful shutdown
-process.on('SIGINT', async () => {
+async function shutdown() {
   console.log('\n[Server] Shutting down...');
+
+  // Close WebSocket server
+  if (wsSyncServer) {
+    console.log('[Server] Stopping WebSocket sync server...');
+    wsSyncServer.stop();
+  }
 
   // Close all transports
   for (const [sessionId, transport] of transports) {
@@ -334,26 +369,41 @@ process.on('SIGINT', async () => {
 
   sessionManager.close();
   process.exit(0);
-});
+}
 
-process.on('SIGTERM', async () => {
-  console.log('\n[Server] Received SIGTERM, shutting down...');
-
-  for (const [sessionId, transport] of transports) {
-    try {
-      await transport.close();
-    } catch (error) {
-      console.error(`[Server] Error closing transport ${sessionId}:`, error);
-    }
-  }
-  transports.clear();
-
-  sessionManager.close();
-  process.exit(0);
-});
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
 
 // Start server
 const server = createServer(app);
+
+if (WS_ENABLED) {
+  // Create WebSocket server attached to HTTP server
+  const wss = new WebSocketServer({ server, path: '/sync' });
+
+  // Initialize WebSocketSyncServer
+  wsSyncServer = new WebSocketSyncServer({
+    apiKeys: apiKeyConfig.keys,
+    teams: apiKeyConfig.teams,
+    pingInterval: WS_PING_INTERVAL,
+    connectionTimeout: WS_CONNECTION_TIMEOUT,
+    onClientConnect: (client) => {
+      console.log(`[WebSocket] Client connected: ${client.clientId} (team: ${client.team || 'none'})`);
+    },
+    onClientDisconnect: (client) => {
+      console.log(`[WebSocket] Client disconnected: ${client.clientId}`);
+    },
+  });
+
+  // Handle WebSocket connections
+  wss.on('connection', (ws) => {
+    const connectionId = wsSyncServer!.handleConnection(ws);
+    console.log(`[WebSocket] New connection: ${connectionId}`);
+  });
+
+  // Start the sync server (ping interval, cleanup)
+  wsSyncServer.start();
+}
 
 server.listen(PORT, HOST, () => {
   console.log(`CC-Memory HTTP MCP Server started`);
@@ -361,6 +411,9 @@ server.listen(PORT, HOST, () => {
   console.log(`  Auth: ${AUTH_MODE}`);
   console.log(`  Data: ${DATA_PATH}`);
   console.log(`  Allowed hosts: ${ALLOWED_HOSTS.join(', ')}`);
+  if (WS_ENABLED) {
+    console.log(`  WebSocket: ws://${HOST}:${PORT}/sync`);
+  }
   if (REQUIRE_HTTPS) {
     console.log(`  HTTPS: required`);
   }
@@ -376,5 +429,10 @@ server.listen(PORT, HOST, () => {
         },
       },
     },
+    ...(WS_ENABLED ? {
+      sync: {
+        websocket: `ws://${HOST}:${PORT}/sync`,
+      },
+    } : {}),
   }, null, 2));
 });

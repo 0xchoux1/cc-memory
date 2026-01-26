@@ -84,6 +84,9 @@ npm run start:http
 | `CC_MEMORY_API_KEYS_FILE` | `~/.claude-memory/api-keys.json` | Path to API keys file |
 | `CC_MEMORY_ALLOWED_HOSTS` | `127.0.0.1,localhost` | Comma-separated allowed hosts |
 | `CC_MEMORY_SESSION_TIMEOUT` | `1800000` | Session timeout in ms (30 min) |
+| `CC_MEMORY_WS_ENABLED` | `true` | Enable WebSocket sync server |
+| `CC_MEMORY_WS_PING_INTERVAL` | `30000` | WebSocket ping interval (ms) |
+| `CC_MEMORY_WS_CONNECTION_TIMEOUT` | `60000` | WebSocket connection timeout (ms) |
 
 ### API Keys Configuration
 
@@ -561,7 +564,32 @@ wisdom_apply({
 
 ### Multi-Agent Collaboration
 
-Track which agent (or persona) learned what, enabling specialized knowledge domains.
+cc-memory supports hierarchical team-based memory sharing with permission controls, shared memory pools, and real-time synchronization.
+
+**Features:**
+- **Permission Model**: Manager, Worker, and Observer roles
+- **Shared Memory Pool**: Team-wide memory accessible by all team members
+- **Real-time Sync**: WebSocket-based synchronization
+- **Audit Logging**: Full traceability of cross-agent access
+- **CRDT Conflict Resolution**: Automatic handling of concurrent updates
+
+**Quick Start:**
+
+```bash
+# Create a team
+cc-memory-cli team create --team-id project-alpha --description "Alpha project team"
+
+# Add agents
+cc-memory-cli agent add --team-id project-alpha --client-id worker-001 --level worker
+cc-memory-cli agent add --team-id project-alpha --client-id observer-001 --level observer
+
+# List team members
+cc-memory-cli agent list --team-id project-alpha
+```
+
+For detailed documentation, see [docs/MULTI_AGENT.md](docs/MULTI_AGENT.md).
+
+**Agent Registration API:**
 
 ```typescript
 // Register an agent
@@ -665,6 +693,8 @@ npm run clean
 cc-memory/
 ├── src/
 │   ├── index.ts              # MCP server entry point
+│   ├── http-server.ts        # HTTP + WebSocket server
+│   ├── cli.ts                # CLI tool for team/agent management
 │   ├── memory/
 │   │   ├── types.ts          # Type definitions (including DIKW & Tachikoma types)
 │   │   ├── WorkingMemory.ts  # Working memory layer
@@ -672,14 +702,30 @@ cc-memory/
 │   │   ├── SemanticMemory.ts # Semantic memory layer
 │   │   └── MemoryManager.ts  # Cross-layer orchestration
 │   ├── server/
-│   │   └── tools.ts          # MCP tool definitions (40+ tools)
+│   │   ├── tools.ts          # MCP tool definitions (40+ tools)
+│   │   ├── http/
+│   │   │   ├── auth/         # API key authentication & permissions
+│   │   │   ├── middleware/   # Security middleware
+│   │   │   └── session/      # Session management
+│   │   └── websocket/
+│   │       └── SyncServer.ts # WebSocket sync server
+│   ├── sync/
+│   │   ├── VectorClock.ts    # CRDT vector clock
+│   │   └── EventDrivenSyncManager.ts  # Event-driven sync
+│   ├── audit/
+│   │   └── AuditLogger.ts    # Audit logging
 │   └── storage/
-│       └── SqliteStorage.ts  # SQLite persistence (including DIKW & Tachikoma tables)
+│       └── SqliteStorage.ts  # SQLite persistence
 ├── tests/
 │   ├── memory/               # Core memory unit tests
-│   └── storage/              # DIKW & Tachikoma unit tests
+│   ├── auth/                 # Permission validator tests
+│   ├── audit/                # Audit logger tests
+│   ├── sync/                 # Vector clock & sync tests
+│   └── integration/          # Multi-agent integration tests
+├── docs/
+│   └── MULTI_AGENT.md        # Multi-agent documentation
 ├── scripts/
-│   └── test-new-features.ts  # Functional test script
+│   └── migrate-api-keys.ts   # API keys v1→v2 migration
 ├── examples/
 │   └── claude-code-config.json
 └── dist/                     # Build output

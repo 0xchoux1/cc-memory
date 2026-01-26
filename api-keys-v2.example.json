@@ -1,0 +1,50 @@
+{
+  "version": "2.0",
+  "teams": {
+    "project-alpha": {
+      "managerId": "manager-agent-001",
+      "sharedPoolId": "shared-pool-alpha",
+      "syncPolicy": {
+        "mode": "event-driven",
+        "batchInterval": 5000,
+        "conflictResolution": "merge_learnings"
+      },
+      "createdAt": 1704067200000,
+      "description": "Project Alpha development team"
+    }
+  },
+  "keys": {
+    "sha256:abc123...": {
+      "clientId": "manager-agent-001",
+      "permissionLevel": "manager",
+      "scopes": ["memory:*"],
+      "team": "project-alpha",
+      "managedAgents": ["worker-001", "worker-002", "observer-001"],
+      "createdAt": 1704067200000
+    },
+    "sha256:def456...": {
+      "clientId": "worker-001",
+      "permissionLevel": "worker",
+      "scopes": ["memory:read", "memory:write", "memory:share:read", "memory:share:write"],
+      "team": "project-alpha",
+      "managerId": "manager-agent-001",
+      "createdAt": 1704067200000
+    },
+    "sha256:ghi789...": {
+      "clientId": "worker-002",
+      "permissionLevel": "worker",
+      "scopes": ["memory:read", "memory:write", "memory:share:read", "memory:share:write"],
+      "team": "project-alpha",
+      "managerId": "manager-agent-001",
+      "createdAt": 1704067200000
+    },
+    "sha256:jkl012...": {
+      "clientId": "observer-001",
+      "permissionLevel": "observer",
+      "scopes": ["memory:read", "memory:share:read"],
+      "team": "project-alpha",
+      "managerId": "manager-agent-001",
+      "createdAt": 1704067200000
+    }
+  }
+}

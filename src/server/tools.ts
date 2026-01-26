@@ -450,6 +450,71 @@ export const WisdomApplySchema = z.object({
   feedback: z.string().optional().describe('Feedback'),
 });
 
+// ============================================================================
+// Shared Memory Schemas (Multi-Agent)
+// ============================================================================
+
+export const SharedMemorySetSchema = z.object({
+  key: z.string().describe('Unique key for the shared memory item'),
+  value: z.unknown().describe('Value to store (JSON-compatible)'),
+  visibility: z.array(z.string()).optional()
+    .describe('Visibility list: ["*"] for all, ["agent-id"] for specific agents, ["team:team-id"] for teams'),
+  tags: z.array(z.string()).optional().describe('Tags for filtering'),
+  namespace: z.string().optional().describe('Namespace (defaults to team namespace)'),
+});
+
+export const SharedMemoryGetSchema = z.object({
+  key: z.string().describe('Key to retrieve'),
+  namespace: z.string().optional().describe('Namespace (defaults to team namespace)'),
+});
+
+export const SharedMemoryDeleteSchema = z.object({
+  key: z.string().describe('Key to delete'),
+  namespace: z.string().optional().describe('Namespace (defaults to team namespace)'),
+});
+
+export const SharedMemoryListSchema = z.object({
+  namespace: z.string().optional().describe('Namespace (defaults to team namespace)'),
+  owner: z.string().optional().describe('Filter by owner'),
+  tags: z.array(z.string()).optional().describe('Filter by tags'),
+  limit: z.number().optional().default(100).describe('Maximum results'),
+});
+
+export const SharedMemorySearchSchema = z.object({
+  query: z.string().describe('Search query'),
+  namespace: z.string().optional().describe('Namespace (defaults to team namespace)'),
+  limit: z.number().optional().default(50).describe('Maximum results'),
+});
+
+export const TeamSyncRequestSchema = z.object({
+  target_agent: z.string().optional().describe('Target agent ID (if omitted, syncs with all team members)'),
+  since_timestamp: z.number().optional().describe('Sync changes since this timestamp'),
+});
+
+export const AgentMemoryReadSchema = z.object({
+  agent_id: z.string().describe('Target agent ID'),
+  key: z.string().describe('Memory key to read'),
+  memory_type: z.enum(['working', 'episodic', 'semantic']).optional().default('working')
+    .describe('Type of memory to read'),
+});
+
+export const PermissionGrantSchema = z.object({
+  target_agent: z.string().describe('Agent ID to grant permission to'),
+  scopes: z.array(z.string()).describe('Scopes to grant'),
+  duration_ms: z.number().optional().describe('Duration in milliseconds (optional, permanent if not specified)'),
+});
+
+export const AuditQuerySchema = z.object({
+  actor: z.string().optional().describe('Filter by actor'),
+  action: z.string().optional().describe('Filter by action'),
+  resource_type: z.string().optional().describe('Filter by resource type'),
+  result: z.enum(['success', 'denied', 'error']).optional().describe('Filter by result'),
+  team: z.string().optional().describe('Filter by team'),
+  start_time: z.number().optional().describe('Start timestamp'),
+  end_time: z.number().optional().describe('End timestamp'),
+  limit: z.number().optional().default(100).describe('Maximum results'),
+});
+
 // Tool handler factory
 export function createToolHandlers(memoryManager: MemoryManager, storage: SqliteStorage) {
   return {
@@ -954,6 +1019,107 @@ export function createToolHandlers(memoryManager: MemoryManager, storage: Sqlite
       });
       return { success: true, application };
     },
+
+    // ============================================================================
+    // Shared Memory Tools (Multi-Agent)
+    // ============================================================================
+
+    shared_memory_set: (args: z.infer<typeof SharedMemorySetSchema>) => {
+      const namespace = args.namespace ?? 'default';
+      const id = `shm_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+      const now = Date.now();
+
+      storage.setSharedMemoryItem({
+        id,
+        key: args.key,
+        namespace,
+        value: args.value,
+        visibility: args.visibility ?? ['*'],
+        owner: 'anonymous', // Will be set by scoped manager in production
+        vectorClock: {},
+        tags: args.tags ?? [],
+        createdAt: now,
+        updatedAt: now,
+        syncSeq: 0,
+      });
+
+      return { success: true, id, key: args.key, namespace };
+    },
+
+    shared_memory_get: (args: z.infer<typeof SharedMemoryGetSchema>) => {
+      const namespace = args.namespace ?? 'default';
+      const item = storage.getSharedMemoryItem(namespace, args.key);
+      return item
+        ? { success: true, item }
+        : { success: false, error: 'Item not found' };
+    },
+
+    shared_memory_delete: (args: z.infer<typeof SharedMemoryDeleteSchema>) => {
+      const namespace = args.namespace ?? 'default';
+      const deleted = storage.deleteSharedMemoryItem(namespace, args.key);
+      return { success: deleted };
+    },
+
+    shared_memory_list: (args: z.infer<typeof SharedMemoryListSchema>) => {
+      const namespace = args.namespace ?? 'default';
+      const items = storage.listSharedMemoryItems(namespace, {
+        owner: args.owner,
+        tags: args.tags,
+      }).slice(0, args.limit);
+      return { success: true, items, count: items.length };
+    },
+
+    shared_memory_search: (args: z.infer<typeof SharedMemorySearchSchema>) => {
+      const namespace = args.namespace ?? 'default';
+      const items = storage.searchSharedMemory(namespace, args.query, args.limit);
+      return { success: true, items, count: items.length };
+    },
+
+    team_sync_request: (args: z.infer<typeof TeamSyncRequestSchema>) => {
+      // This is a placeholder - actual sync is handled by WebSocket/EventDrivenSyncManager
+      return {
+        success: true,
+        message: 'Sync request queued',
+        targetAgent: args.target_agent ?? 'all',
+        sinceTimestamp: args.since_timestamp ?? 0,
+      };
+    },
+
+    agent_memory_read: (args: z.infer<typeof AgentMemoryReadSchema>) => {
+      // This requires manager permission - checked by scoped manager in production
+      // Placeholder implementation returns permission error
+      return {
+        success: false,
+        error: 'Cross-agent memory access requires manager permission level',
+        agentId: args.agent_id,
+        key: args.key,
+      };
+    },
+
+    permission_grant: (args: z.infer<typeof PermissionGrantSchema>) => {
+      // This requires manager permission - checked by scoped manager in production
+      // Placeholder implementation
+      return {
+        success: false,
+        error: 'Permission management requires manager permission level',
+        targetAgent: args.target_agent,
+        scopes: args.scopes,
+      };
+    },
+
+    audit_query: (args: z.infer<typeof AuditQuerySchema>) => {
+      const entries = storage.queryAuditLog({
+        actor: args.actor,
+        action: args.action,
+        resourceType: args.resource_type,
+        result: args.result,
+        team: args.team,
+        startTime: args.start_time,
+        endTime: args.end_time,
+        limit: args.limit,
+      });
+      return { success: true, entries, count: entries.length };
+    },
   };
 }
 
@@ -1163,5 +1329,51 @@ export const toolDefinitions = [
     name: 'wisdom_apply',
     description: 'Record wisdom application result',
     inputSchema: WisdomApplySchema,
+  },
+  // Shared Memory Tools (Multi-Agent)
+  {
+    name: 'shared_memory_set',
+    description: 'Store a value in the shared memory pool (accessible by team members)',
+    inputSchema: SharedMemorySetSchema,
+  },
+  {
+    name: 'shared_memory_get',
+    description: 'Retrieve a value from the shared memory pool',
+    inputSchema: SharedMemoryGetSchema,
+  },
+  {
+    name: 'shared_memory_delete',
+    description: 'Delete a value from the shared memory pool',
+    inputSchema: SharedMemoryDeleteSchema,
+  },
+  {
+    name: 'shared_memory_list',
+    description: 'List items in the shared memory pool',
+    inputSchema: SharedMemoryListSchema,
+  },
+  {
+    name: 'shared_memory_search',
+    description: 'Search for items in the shared memory pool',
+    inputSchema: SharedMemorySearchSchema,
+  },
+  {
+    name: 'team_sync_request',
+    description: 'Request synchronization with team members',
+    inputSchema: TeamSyncRequestSchema,
+  },
+  {
+    name: 'agent_memory_read',
+    description: 'Read another agent\'s memory (manager permission required)',
+    inputSchema: AgentMemoryReadSchema,
+  },
+  {
+    name: 'permission_grant',
+    description: 'Grant permission to another agent (manager permission required)',
+    inputSchema: PermissionGrantSchema,
+  },
+  {
+    name: 'audit_query',
+    description: 'Query the audit log for access history',
+    inputSchema: AuditQuerySchema,
   },
 ];

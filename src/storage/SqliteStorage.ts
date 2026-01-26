@@ -365,6 +365,58 @@ export class SqliteStorage {
     this.db.run(`CREATE INDEX IF NOT EXISTS idx_wisdom_app_result ON wisdom_applications(result)`);
 
     // ============================================================================
+    // Shared Memory Pool Tables (Multi-Agent)
+    // ============================================================================
+
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS shared_memory (
+        id TEXT PRIMARY KEY,
+        key TEXT NOT NULL,
+        namespace TEXT NOT NULL,
+        value TEXT NOT NULL,
+        visibility TEXT NOT NULL,
+        owner TEXT NOT NULL,
+        vector_clock TEXT NOT NULL DEFAULT '{}',
+        tags TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        sync_seq INTEGER DEFAULT 0,
+        UNIQUE(namespace, key)
+      )
+    `);
+
+    this.db.run(`CREATE INDEX IF NOT EXISTS idx_shared_namespace ON shared_memory(namespace)`);
+    this.db.run(`CREATE INDEX IF NOT EXISTS idx_shared_key ON shared_memory(key)`);
+    this.db.run(`CREATE INDEX IF NOT EXISTS idx_shared_owner ON shared_memory(owner)`);
+    this.db.run(`CREATE INDEX IF NOT EXISTS idx_shared_updated ON shared_memory(updated_at)`);
+
+    // Audit Log Table
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS audit_log (
+        id TEXT PRIMARY KEY,
+        timestamp INTEGER NOT NULL,
+        actor TEXT NOT NULL,
+        actor_permission_level TEXT,
+        action TEXT NOT NULL,
+        resource TEXT NOT NULL,
+        resource_type TEXT NOT NULL,
+        target TEXT,
+        result TEXT NOT NULL,
+        reason TEXT,
+        metadata TEXT,
+        team TEXT,
+        session_id TEXT,
+        ip_address TEXT
+      )
+    `);
+
+    this.db.run(`CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp)`);
+    this.db.run(`CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_log(actor)`);
+    this.db.run(`CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action)`);
+    this.db.run(`CREATE INDEX IF NOT EXISTS idx_audit_result ON audit_log(result)`);
+    this.db.run(`CREATE INDEX IF NOT EXISTS idx_audit_team ON audit_log(team)`);
+
+    // ============================================================================
     // Extended columns for existing tables (migration)
     // ============================================================================
 
@@ -2708,5 +2760,366 @@ export class SqliteStorage {
       relation.metadata ? JSON.stringify(relation.metadata) : null,
       relation.createdAt,
     ]);
+  }
+
+  // ============================================================================
+  // Shared Memory Operations
+  // ============================================================================
+
+  setSharedMemoryItem(item: {
+    id: string;
+    key: string;
+    namespace: string;
+    value: unknown;
+    visibility: string[];
+    owner: string;
+    vectorClock: Record<string, number>;
+    tags: string[];
+    createdAt: number;
+    updatedAt: number;
+    syncSeq: number;
+  }): void {
+    if (!this.db) return;
+
+    this.db.run(`
+      INSERT OR REPLACE INTO shared_memory
+      (id, key, namespace, value, visibility, owner, vector_clock, tags, created_at, updated_at, sync_seq)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+      item.id,
+      item.key,
+      item.namespace,
+      JSON.stringify(item.value),
+      JSON.stringify(item.visibility),
+      item.owner,
+      JSON.stringify(item.vectorClock),
+      JSON.stringify(item.tags),
+      item.createdAt,
+      item.updatedAt,
+      item.syncSeq,
+    ]);
+
+    this.save();
+  }
+
+  getSharedMemoryItem(namespace: string, key: string): {
+    id: string;
+    key: string;
+    namespace: string;
+    value: unknown;
+    visibility: string[];
+    owner: string;
+    vectorClock: Record<string, number>;
+    tags: string[];
+    createdAt: number;
+    updatedAt: number;
+    syncSeq: number;
+  } | null {
+    if (!this.db) return null;
+
+    const result = this.db.exec(
+      'SELECT * FROM shared_memory WHERE namespace = ? AND key = ?',
+      [namespace, key]
+    );
+
+    if (result.length === 0 || result[0].values.length === 0) return null;
+
+    const row = this.arrayToObject(result[0].columns, result[0].values[0]);
+    return this.rowToSharedMemoryItem(row);
+  }
+
+  deleteSharedMemoryItem(namespace: string, key: string): boolean {
+    if (!this.db) return false;
+
+    this.db.run('DELETE FROM shared_memory WHERE namespace = ? AND key = ?', [namespace, key]);
+    const changes = this.db.getRowsModified();
+    this.save();
+    return changes > 0;
+  }
+
+  listSharedMemoryItems(namespace: string, filter?: {
+    owner?: string;
+    tags?: string[];
+  }): Array<{
+    id: string;
+    key: string;
+    namespace: string;
+    value: unknown;
+    visibility: string[];
+    owner: string;
+    vectorClock: Record<string, number>;
+    tags: string[];
+    createdAt: number;
+    updatedAt: number;
+    syncSeq: number;
+  }> {
+    if (!this.db) return [];
+
+    let sql = 'SELECT * FROM shared_memory WHERE namespace = ?';
+    const params: (string | number)[] = [namespace];
+
+    if (filter?.owner) {
+      sql += ' AND owner = ?';
+      params.push(filter.owner);
+    }
+
+    sql += ' ORDER BY updated_at DESC';
+
+    const result = this.db.exec(sql, params);
+    if (result.length === 0) return [];
+
+    const items = result[0].values.map(row => {
+      const obj = this.arrayToObject(result[0].columns, row);
+      return this.rowToSharedMemoryItem(obj);
+    });
+
+    // Filter by tags if provided
+    if (filter?.tags && filter.tags.length > 0) {
+      return items.filter(item =>
+        filter.tags!.every(tag => item.tags.includes(tag))
+      );
+    }
+
+    return items;
+  }
+
+  searchSharedMemory(namespace: string, query: string, limit: number = 100): Array<{
+    id: string;
+    key: string;
+    namespace: string;
+    value: unknown;
+    visibility: string[];
+    owner: string;
+    vectorClock: Record<string, number>;
+    tags: string[];
+    createdAt: number;
+    updatedAt: number;
+    syncSeq: number;
+  }> {
+    if (!this.db) return [];
+
+    const searchPattern = `%${query}%`;
+    const result = this.db.exec(`
+      SELECT * FROM shared_memory
+      WHERE namespace = ?
+        AND (key LIKE ? OR value LIKE ? OR tags LIKE ?)
+      ORDER BY updated_at DESC
+      LIMIT ?
+    `, [namespace, searchPattern, searchPattern, searchPattern, limit]);
+
+    if (result.length === 0) return [];
+
+    return result[0].values.map(row => {
+      const obj = this.arrayToObject(result[0].columns, row);
+      return this.rowToSharedMemoryItem(obj);
+    });
+  }
+
+  countSharedMemoryItems(namespace: string, filter?: { owner?: string }): number {
+    if (!this.db) return 0;
+
+    let sql = 'SELECT COUNT(*) FROM shared_memory WHERE namespace = ?';
+    const params: string[] = [namespace];
+
+    if (filter?.owner) {
+      sql += ' AND owner = ?';
+      params.push(filter.owner);
+    }
+
+    const result = this.db.exec(sql, params);
+    return result[0]?.values[0]?.[0] as number ?? 0;
+  }
+
+  private rowToSharedMemoryItem(row: Record<string, unknown>): {
+    id: string;
+    key: string;
+    namespace: string;
+    value: unknown;
+    visibility: string[];
+    owner: string;
+    vectorClock: Record<string, number>;
+    tags: string[];
+    createdAt: number;
+    updatedAt: number;
+    syncSeq: number;
+  } {
+    return {
+      id: row.id as string,
+      key: row.key as string,
+      namespace: row.namespace as string,
+      value: JSON.parse(row.value as string),
+      visibility: JSON.parse(row.visibility as string),
+      owner: row.owner as string,
+      vectorClock: JSON.parse(row.vector_clock as string),
+      tags: JSON.parse(row.tags as string || '[]'),
+      createdAt: row.created_at as number,
+      updatedAt: row.updated_at as number,
+      syncSeq: row.sync_seq as number,
+    };
+  }
+
+  // ============================================================================
+  // Audit Log Operations
+  // ============================================================================
+
+  insertAuditEntry(entry: {
+    id: string;
+    timestamp: number;
+    actor: string;
+    actorPermissionLevel?: string;
+    action: string;
+    resource: string;
+    resourceType: string;
+    target?: string;
+    result: string;
+    reason?: string;
+    metadata?: Record<string, unknown>;
+    team?: string;
+    sessionId?: string;
+    ipAddress?: string;
+  }): void {
+    if (!this.db) return;
+
+    this.db.run(`
+      INSERT INTO audit_log (
+        id, timestamp, actor, actor_permission_level, action, resource, resource_type,
+        target, result, reason, metadata, team, session_id, ip_address
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+      entry.id,
+      entry.timestamp,
+      entry.actor,
+      entry.actorPermissionLevel ?? null,
+      entry.action,
+      entry.resource,
+      entry.resourceType,
+      entry.target ?? null,
+      entry.result,
+      entry.reason ?? null,
+      entry.metadata ? JSON.stringify(entry.metadata) : null,
+      entry.team ?? null,
+      entry.sessionId ?? null,
+      entry.ipAddress ?? null,
+    ]);
+
+    this.save();
+  }
+
+  queryAuditLog(filters: {
+    actor?: string;
+    action?: string;
+    resource?: string;
+    resourceType?: string;
+    target?: string;
+    result?: string;
+    team?: string;
+    startTime?: number;
+    endTime?: number;
+    limit?: number;
+    offset?: number;
+  }): Array<{
+    id: string;
+    timestamp: number;
+    actor: string;
+    actorPermissionLevel?: string;
+    action: string;
+    resource: string;
+    resourceType: string;
+    target?: string;
+    result: string;
+    reason?: string;
+    metadata?: Record<string, unknown>;
+    team?: string;
+    sessionId?: string;
+    ipAddress?: string;
+  }> {
+    if (!this.db) return [];
+
+    let sql = 'SELECT * FROM audit_log WHERE 1=1';
+    const params: (string | number | null)[] = [];
+
+    if (filters.actor) {
+      sql += ' AND actor = ?';
+      params.push(filters.actor);
+    }
+    if (filters.action) {
+      sql += ' AND action = ?';
+      params.push(filters.action);
+    }
+    if (filters.resource) {
+      sql += ' AND resource = ?';
+      params.push(filters.resource);
+    }
+    if (filters.resourceType) {
+      sql += ' AND resource_type = ?';
+      params.push(filters.resourceType);
+    }
+    if (filters.target) {
+      sql += ' AND target = ?';
+      params.push(filters.target);
+    }
+    if (filters.result) {
+      sql += ' AND result = ?';
+      params.push(filters.result);
+    }
+    if (filters.team) {
+      sql += ' AND team = ?';
+      params.push(filters.team);
+    }
+    if (filters.startTime) {
+      sql += ' AND timestamp >= ?';
+      params.push(filters.startTime);
+    }
+    if (filters.endTime) {
+      sql += ' AND timestamp <= ?';
+      params.push(filters.endTime);
+    }
+
+    sql += ' ORDER BY timestamp DESC';
+
+    if (filters.limit) {
+      sql += ` LIMIT ${filters.limit}`;
+    }
+    if (filters.offset) {
+      sql += ` OFFSET ${filters.offset}`;
+    }
+
+    const result = this.db.exec(sql, params);
+    if (result.length === 0) return [];
+
+    return result[0].values.map(row => {
+      const obj = this.arrayToObject(result[0].columns, row);
+      return {
+        id: obj.id as string,
+        timestamp: obj.timestamp as number,
+        actor: obj.actor as string,
+        actorPermissionLevel: obj.actor_permission_level as string | undefined,
+        action: obj.action as string,
+        resource: obj.resource as string,
+        resourceType: obj.resource_type as string,
+        target: obj.target as string | undefined,
+        result: obj.result as string,
+        reason: obj.reason as string | undefined,
+        metadata: obj.metadata ? JSON.parse(obj.metadata as string) : undefined,
+        team: obj.team as string | undefined,
+        sessionId: obj.session_id as string | undefined,
+        ipAddress: obj.ip_address as string | undefined,
+      };
+    });
+  }
+
+  pruneAuditLog(olderThan: number): number {
+    if (!this.db) return 0;
+
+    const countResult = this.db.exec(
+      'SELECT COUNT(*) FROM audit_log WHERE timestamp < ?',
+      [olderThan]
+    );
+    const count = countResult[0]?.values[0]?.[0] as number ?? 0;
+
+    this.db.run('DELETE FROM audit_log WHERE timestamp < ?', [olderThan]);
+    this.save();
+
+    return count;
   }
 }

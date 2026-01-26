@@ -38,8 +38,8 @@ describe('API key auth', () => {
       [hashed]: { clientId: 'client-1', scopes: ['memory:read'] },
     }), 'utf-8');
 
-    const keys = loadApiKeysFromFile(filePath);
-    const middleware = createApiKeyAuth({ keys });
+    const config = loadApiKeysFromFile(filePath);
+    const middleware = createApiKeyAuth(config);
 
     const req = {
       headers: { authorization: `Bearer ${rawKey}` },
@@ -61,8 +61,8 @@ describe('API key auth', () => {
       [rawKey]: { clientId: 'client-2', scopes: ['memory:read'] },
     }), 'utf-8');
 
-    const keys = loadApiKeysFromFile(filePath);
-    const middleware = createApiKeyAuth({ keys });
+    const config = loadApiKeysFromFile(filePath);
+    const middleware = createApiKeyAuth(config);
 
     const req = {
       headers: { authorization: `Bearer ${rawKey}` },
@@ -83,8 +83,8 @@ describe('API key auth', () => {
       [hashApiKey('valid')]: { clientId: 'client-3', scopes: ['memory:read'] },
     }), 'utf-8');
 
-    const keys = loadApiKeysFromFile(filePath);
-    const middleware = createApiKeyAuth({ keys });
+    const config = loadApiKeysFromFile(filePath);
+    const middleware = createApiKeyAuth(config);
 
     const req = {
       headers: { authorization: 'Bearer invalid' },
