@@ -1,0 +1,24 @@
+[Unit]
+Description=CC-Memory HTTP MCP Server
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/src/github.com/0xchoux1/cc-memory
+ExecStart=/usr/bin/env node dist/http-server.js
+Restart=on-failure
+RestartSec=5
+
+# Environment variables (customize as needed)
+Environment=CC_MEMORY_PORT=3000
+Environment=CC_MEMORY_HOST=0.0.0.0
+Environment=CC_MEMORY_AUTH_MODE=apikey
+# Add your server's IP address to ALLOWED_HOSTS
+Environment=CC_MEMORY_ALLOWED_HOSTS=127.0.0.1,localhost
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
