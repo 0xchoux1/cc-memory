@@ -556,6 +556,8 @@ import {
 export interface ToolContext {
   auth?: AuthInfo;
   apiKeysFilePath?: string;
+  /** Team-shared storage for shared_memory_* operations */
+  sharedStorage?: SqliteStorage;
 }
 
 // Tool handler factory
@@ -1069,20 +1071,22 @@ export function createToolHandlers(
 
     // ============================================================================
     // Shared Memory Tools (Multi-Agent)
+    // Uses team-shared storage if available, otherwise falls back to individual storage
     // ============================================================================
 
     shared_memory_set: (args: z.infer<typeof SharedMemorySetSchema>) => {
-      const namespace = args.namespace ?? 'default';
+      const sharedStore = context.sharedStorage ?? storage;
+      const namespace = args.namespace ?? context.auth?.team ?? 'default';
       const id = `shm_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
       const now = Date.now();
 
-      storage.setSharedMemoryItem({
+      sharedStore.setSharedMemoryItem({
         id,
         key: args.key,
         namespace,
         value: args.value,
         visibility: args.visibility ?? ['*'],
-        owner: 'anonymous', // Will be set by scoped manager in production
+        owner: context.auth?.clientId ?? 'anonymous',
         vectorClock: {},
         tags: args.tags ?? [],
         createdAt: now,
@@ -1094,22 +1098,25 @@ export function createToolHandlers(
     },
 
     shared_memory_get: (args: z.infer<typeof SharedMemoryGetSchema>) => {
-      const namespace = args.namespace ?? 'default';
-      const item = storage.getSharedMemoryItem(namespace, args.key);
+      const sharedStore = context.sharedStorage ?? storage;
+      const namespace = args.namespace ?? context.auth?.team ?? 'default';
+      const item = sharedStore.getSharedMemoryItem(namespace, args.key);
       return item
         ? { success: true, item }
         : { success: false, error: 'Item not found' };
     },
 
     shared_memory_delete: (args: z.infer<typeof SharedMemoryDeleteSchema>) => {
-      const namespace = args.namespace ?? 'default';
-      const deleted = storage.deleteSharedMemoryItem(namespace, args.key);
+      const sharedStore = context.sharedStorage ?? storage;
+      const namespace = args.namespace ?? context.auth?.team ?? 'default';
+      const deleted = sharedStore.deleteSharedMemoryItem(namespace, args.key);
       return { success: deleted };
     },
 
     shared_memory_list: (args: z.infer<typeof SharedMemoryListSchema>) => {
-      const namespace = args.namespace ?? 'default';
-      const items = storage.listSharedMemoryItems(namespace, {
+      const sharedStore = context.sharedStorage ?? storage;
+      const namespace = args.namespace ?? context.auth?.team ?? 'default';
+      const items = sharedStore.listSharedMemoryItems(namespace, {
         owner: args.owner,
         tags: args.tags,
       }).slice(0, args.limit);
@@ -1117,8 +1124,9 @@ export function createToolHandlers(
     },
 
     shared_memory_search: (args: z.infer<typeof SharedMemorySearchSchema>) => {
-      const namespace = args.namespace ?? 'default';
-      const items = storage.searchSharedMemory(namespace, args.query, args.limit);
+      const sharedStore = context.sharedStorage ?? storage;
+      const namespace = args.namespace ?? context.auth?.team ?? 'default';
+      const items = sharedStore.searchSharedMemory(namespace, args.query, args.limit);
       return { success: true, items, count: items.length };
     },
 

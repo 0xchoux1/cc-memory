@@ -5,8 +5,10 @@
 
 import { randomUUID } from 'crypto';
 import { join } from 'path';
+import { mkdirSync } from 'fs';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { MemoryManager } from '../../../memory/MemoryManager.js';
+import { SqliteStorage } from '../../../storage/SqliteStorage.js';
 import { createMcpServer } from '../../common/mcpServer.js';
 import type { AuthInfo } from '../auth/types.js';
 
@@ -15,6 +17,7 @@ export interface Session {
   clientId: string;
   mcpServer: McpServer;
   memoryManager: MemoryManager;
+  sharedStorage: SqliteStorage | null;
   auth?: AuthInfo;
   createdAt: number;
   lastAccess: number;
@@ -37,6 +40,10 @@ export class SessionManager {
   private sessions: Map<string, Session> = new Map();
   private clientSessions: Map<string, Set<string>> = new Map();
   private clientManagers: Map<string, MemoryManager> = new Map();
+  /** Team-shared storage instances (one per team) */
+  private teamStorages: Map<string, SqliteStorage> = new Map();
+  /** Track which clients use each team storage for cleanup */
+  private teamClients: Map<string, Set<string>> = new Map();
   private readonly config: Required<Omit<SessionManagerConfig, 'apiKeysFilePath'>> & Pick<SessionManagerConfig, 'apiKeysFilePath'>;
   private cleanupTimer?: ReturnType<typeof setInterval>;
 
@@ -91,9 +98,25 @@ export class SessionManager {
       this.clientManagers.set(clientId, memoryManager);
     }
 
+    // Get or create team-shared storage if client belongs to a team
+    let sharedStorage: SqliteStorage | null = null;
+    const teamId = auth?.team;
+    if (teamId) {
+      sharedStorage = this.teamStorages.get(teamId) ?? null;
+      if (!sharedStorage) {
+        const teamDataPath = join(this.config.dataPath, 'teams', teamId);
+        mkdirSync(teamDataPath, { recursive: true });
+        sharedStorage = new SqliteStorage({ dataPath: teamDataPath });
+        this.teamStorages.set(teamId, sharedStorage);
+        this.teamClients.set(teamId, new Set());
+      }
+      this.teamClients.get(teamId)!.add(clientId);
+    }
+
     const mcpServer = createMcpServer({
       memoryManager,
       storage: memoryManager.getStorage(),
+      sharedStorage,
       serverName: `cc-memory-${clientId}`,
       auth,
       apiKeysFilePath: this.config.apiKeysFilePath,
@@ -104,6 +127,7 @@ export class SessionManager {
       clientId,
       mcpServer,
       memoryManager,
+      sharedStorage,
       auth,
       createdAt: Date.now(),
       lastAccess: Date.now(),
@@ -161,6 +185,23 @@ export class SessionManager {
           if (manager) {
             manager.close();
             this.clientManagers.delete(session.clientId);
+          }
+
+          // Clean up team storage reference if this was the last client in the team
+          const teamId = session.auth?.team;
+          if (teamId) {
+            const teamClients = this.teamClients.get(teamId);
+            if (teamClients) {
+              teamClients.delete(session.clientId);
+              if (teamClients.size === 0) {
+                this.teamClients.delete(teamId);
+                const teamStorage = this.teamStorages.get(teamId);
+                if (teamStorage) {
+                  teamStorage.close();
+                  this.teamStorages.delete(teamId);
+                }
+              }
+            }
           }
         }
       }
@@ -227,8 +268,19 @@ export class SessionManager {
       }
     }
 
+    // Close team shared storages
+    for (const storage of this.teamStorages.values()) {
+      try {
+        storage.close();
+      } catch (error) {
+        console.error('[SessionManager] Error closing team storage:', error);
+      }
+    }
+
     this.sessions.clear();
     this.clientSessions.clear();
     this.clientManagers.clear();
+    this.teamStorages.clear();
+    this.teamClients.clear();
   }
 }

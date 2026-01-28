@@ -111,6 +111,8 @@ import type { AuthInfo } from '../http/auth/types.js';
 export interface CreateMcpServerOptions {
   memoryManager: MemoryManager;
   storage: SqliteStorage;
+  /** Team-shared storage for shared_memory_* operations */
+  sharedStorage?: SqliteStorage | null;
   serverName?: string;
   serverVersion?: string;
   /** Authentication info for the current user */
@@ -126,6 +128,7 @@ export function createMcpServer(options: CreateMcpServerOptions): McpServer {
   const {
     memoryManager,
     storage,
+    sharedStorage,
     serverName = 'cc-memory',
     serverVersion = '1.0.0',
     auth,
@@ -135,6 +138,7 @@ export function createMcpServer(options: CreateMcpServerOptions): McpServer {
   const handlers = createToolHandlers(memoryManager, storage, {
     auth,
     apiKeysFilePath,
+    sharedStorage: sharedStorage ?? undefined,
   });
 
   const server = new McpServer({
