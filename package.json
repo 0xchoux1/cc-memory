@@ -4,8 +4,14 @@
   "description": "Hierarchical memory system for Claude Code - MCP Server",
   "main": "dist/index.js",
   "bin": {
-    "cc-memory-cli": "dist/cli.js"
+    "cc-memory": "dist/cli/index.js",
+    "cc-memory-cli": "dist/cli.js",
+    "cc-memory-tutorial": "dist/cli/tutorial.js"
   },
+  "files": [
+    "dist",
+    "templates"
+  ],
   "type": "module",
   "scripts": {
     "build": "tsc",
@@ -14,7 +20,8 @@
     "dev": "tsc --watch",
     "test": "vitest run",
     "test:watch": "vitest",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "tutorial": "npx tsx src/cli/tutorial.ts"
   },
   "keywords": [
     "mcp",

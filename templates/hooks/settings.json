@@ -1,0 +1,45 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "description": "CC-Memory OODA Session Start",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/ooda-session-start.sh",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "description": "CC-Memory OODA Error Handler",
+        "matcher": "Bash|Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/ooda-error-handler.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "description": "CC-Memory OODA Session End",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/ooda-session-end.sh",
+            "timeout": 20
+          },
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/save-transcript.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
