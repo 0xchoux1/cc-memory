@@ -6,9 +6,7 @@
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D18.0.0-green.svg)](https://nodejs.org/)
 [![MCP](https://img.shields.io/badge/MCP-Compatible-purple.svg)](https://modelcontextprotocol.io/)
 
-<!-- TODO: デモGIFを追加
-![cc-memory demo](./docs/assets/demo.gif)
--->
+![cc-memory demo](./demo/cc-memory-demo.gif)
 
 ---
 
