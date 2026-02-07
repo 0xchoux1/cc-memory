@@ -3,7 +3,7 @@
  * Implements capacity limit inspired by Cowan's 4±1 model
  */
 
-import { v4 as uuidv4 } from 'uuid';
+import { v7 as uuidv7 } from 'uuid';
 import type { SqliteStorage } from '../storage/SqliteStorage.js';
 import type {
   WorkingMemoryItem,
@@ -53,7 +53,7 @@ export class WorkingMemory {
     const existing = this.storage.getWorkingItem(input.key);
 
     const item: WorkingMemoryItem = {
-      id: existing?.id || uuidv4(),
+      id: existing?.id || uuidv7(),
       type,
       key: input.key,
       value: input.value,

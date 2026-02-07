@@ -2,7 +2,7 @@
  * Memory Manager - Orchestrates all memory layers
  */
 
-import { v4 as uuidv4 } from 'uuid';
+import { v7 as uuidv7 } from 'uuid';
 import { SqliteStorage } from '../storage/SqliteStorage.js';
 import { WorkingMemory, type WorkingMemoryConfig } from './WorkingMemory.js';
 import { EpisodicMemory } from './EpisodicMemory.js';
@@ -48,7 +48,7 @@ export class MemoryManager {
   private cleanupInterval: NodeJS.Timeout | null = null;
 
   constructor(config: MemoryManagerConfig) {
-    this.sessionId = config.sessionId || uuidv4();
+    this.sessionId = config.sessionId || uuidv7();
     this.storage = new SqliteStorage(config);
 
     this.working = new WorkingMemory(this.storage, this.sessionId, {

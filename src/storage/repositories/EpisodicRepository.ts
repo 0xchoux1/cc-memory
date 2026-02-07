@@ -11,7 +11,7 @@ import type {
   Transcript,
   TranscriptMetadata,
 } from '../../memory/types.js';
-import { v4 as uuidv4 } from 'uuid';
+import { v7 as uuidv7 } from 'uuid';
 
 export class EpisodicRepository extends BaseRepository {
   constructor(connection: DatabaseConnection) {
@@ -99,7 +99,7 @@ export class EpisodicRepository extends BaseRepository {
    */
   record(input: EpisodicMemoryInput): EpisodicMemory {
     const now = Date.now();
-    const id = uuidv4();
+    const id = uuidv7();
 
     // Calculate emotional defaults based on type
     const emotionalDefaults: Record<string, { valence: number; arousal: number }> = {

@@ -11,7 +11,7 @@ import type {
   SemanticQuery,
   EntitySource,
 } from '../../memory/types.js';
-import { v4 as uuidv4 } from 'uuid';
+import { v7 as uuidv7 } from 'uuid';
 
 export class SemanticRepository extends BaseRepository {
   constructor(connection: DatabaseConnection) {
@@ -71,7 +71,7 @@ export class SemanticRepository extends BaseRepository {
    */
   create(input: SemanticEntityInput): SemanticEntity {
     const now = Date.now();
-    const id = uuidv4();
+    const id = uuidv7();
 
     const entity: SemanticEntity = {
       id,
@@ -258,7 +258,7 @@ export class SemanticRepository extends BaseRepository {
     strength: number = 1.0,
     metadata?: Record<string, unknown>
   ): SemanticRelation {
-    const id = uuidv4();
+    const id = uuidv7();
     const now = Date.now();
 
     this.run(`

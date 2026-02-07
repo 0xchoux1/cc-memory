@@ -11,7 +11,7 @@
  * - Step execution delegation for durable workflows
  */
 
-import { v4 as uuidv4 } from 'uuid';
+import { v7 as uuidv7 } from 'uuid';
 import type {
   AgentCard,
   AgentCapability,
@@ -331,8 +331,8 @@ export class AgentCoordinator {
   ): Promise<DurableTask> {
     const now = Date.now();
     const task: DurableTask = {
-      id: uuidv4(),
-      contextId: contextId ?? uuidv4(),
+      id: uuidv7(),
+      contextId: contextId ?? uuidv7(),
       status: 'submitted',
       summary,
       description,
@@ -389,7 +389,7 @@ export class AgentCoordinator {
 
     // Add delegation message
     const message: TaskMessage = {
-      id: uuidv4(),
+      id: uuidv7(),
       role: 'agent',
       agentId: this.tachikomaId,
       parts: [
@@ -537,7 +537,7 @@ export class AgentCoordinator {
     if (status === 'completed' || status === 'failed') {
       // Add completion message
       const message: TaskMessage = {
-        id: uuidv4(),
+        id: uuidv7(),
         role: 'agent',
         agentId: task.assignedTo,
         parts: [
@@ -594,7 +594,7 @@ export class AgentCoordinator {
     }
 
     const message: TaskMessage = {
-      id: uuidv4(),
+      id: uuidv7(),
       role,
       agentId,
       parts: [{ type: 'text', content }],

@@ -13,7 +13,7 @@
  * - Step-level persistence for fault tolerance
  */
 
-import { v4 as uuidv4 } from 'uuid';
+import { v7 as uuidv7 } from 'uuid';
 import type {
   DurableWorkflow,
   DurableStep,
@@ -134,8 +134,8 @@ export class WorkflowManager {
     metadata?: WorkflowMetadata
   ): Promise<DurableWorkflow> {
     const now = Date.now();
-    const workflowId = uuidv4();
-    const contextId = metadata?.properties?.contextId as string ?? uuidv4();
+    const workflowId = uuidv7();
+    const contextId = metadata?.properties?.contextId as string ?? uuidv7();
 
     const steps: DurableStep[] = definition.steps.map((stepDef, index) => ({
       id: `${workflowId}-step-${index}`,

@@ -2,7 +2,7 @@
  * Semantic Memory - Long-term memory for facts, procedures, and knowledge
  */
 
-import { v4 as uuidv4 } from 'uuid';
+import { v7 as uuidv7 } from 'uuid';
 import type { SqliteStorage } from '../storage/SqliteStorage.js';
 import type {
   SemanticEntity,
@@ -26,7 +26,7 @@ export class SemanticMemory {
     const now = Date.now();
 
     const entity: SemanticEntity = {
-      id: uuidv4(),
+      id: uuidv7(),
       name: input.name,
       type: input.type,
       description: input.description,
@@ -129,7 +129,7 @@ export class SemanticMemory {
     if (!fromEntity || !toEntity) return null;
 
     const relation: SemanticRelation = {
-      id: uuidv4(),
+      id: uuidv7(),
       from: fromEntity.id,
       to: toEntity.id,
       relationType,

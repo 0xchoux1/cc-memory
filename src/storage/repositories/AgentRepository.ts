@@ -5,7 +5,7 @@
 import { BaseRepository } from './BaseRepository.js';
 import type { DatabaseConnection } from '../DatabaseConnection.js';
 import type { AgentProfile, AgentProfileInput, AgentRole } from '../../memory/types.js';
-import { v4 as uuidv4 } from 'uuid';
+import { v7 as uuidv7 } from 'uuid';
 
 export class AgentRepository extends BaseRepository {
   constructor(connection: DatabaseConnection) {
@@ -42,7 +42,7 @@ export class AgentRepository extends BaseRepository {
    */
   create(input: AgentProfileInput): AgentProfile {
     const now = Date.now();
-    const id = `agent_${uuidv4()}`;
+    const id = `agent_${uuidv7()}`;
 
     const profile: AgentProfile = {
       id,

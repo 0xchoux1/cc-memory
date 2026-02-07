@@ -846,9 +846,8 @@ export class SqliteStorage {
           sql += ` AND em.id IN (${placeholders})`;
           params.push(...ids);
         } else {
-          // No index results - fall back to LIKE for newly created data not yet indexed
-          sql += ' AND (em.summary LIKE ? OR em.details LIKE ?)';
-          params.push(`%${query.query}%`, `%${query.query}%`);
+          // No results found in index
+          sql += ' AND 1=0';
         }
       }
     }
@@ -1094,9 +1093,8 @@ export class SqliteStorage {
         sql += ` AND id IN (${placeholders})`;
         params.push(...ids);
       } else {
-        // No index results - fall back to LIKE for newly created data not yet indexed
-        sql += ' AND (name LIKE ? OR description LIKE ? OR observations LIKE ?)';
-        params.push(`%${query.query}%`, `%${query.query}%`, `%${query.query}%`);
+        // No results found in index
+        sql += ' AND 1=0';
       }
     }
 
@@ -2137,8 +2135,7 @@ export class SqliteStorage {
         sql += ` AND id IN (${placeholders})`;
         params.push(...ids);
       } else {
-        sql += ' AND pattern LIKE ?';
-        params.push(`%${query.query}%`);
+        sql += ' AND 1=0';
       }
     }
 
@@ -2279,8 +2276,7 @@ export class SqliteStorage {
         sql += ` AND id IN (${placeholders})`;
         params.push(...ids);
       } else {
-        sql += ' AND (insight LIKE ? OR reasoning LIKE ?)';
-        params.push(`%${query.query}%`, `%${query.query}%`);
+        sql += ' AND 1=0';
       }
     }
 
@@ -2429,8 +2425,7 @@ export class SqliteStorage {
         sql += ` AND id IN (${placeholders})`;
         params.push(...ids);
       } else {
-        sql += ' AND (name LIKE ? OR principle LIKE ? OR description LIKE ?)';
-        params.push(`%${query.query}%`, `%${query.query}%`, `%${query.query}%`);
+        sql += ' AND 1=0';
       }
     }
 

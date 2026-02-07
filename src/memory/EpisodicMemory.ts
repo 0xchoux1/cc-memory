@@ -2,7 +2,7 @@
  * Episodic Memory - Long-term memory for past events, incidents, and interactions
  */
 
-import { v4 as uuidv4 } from 'uuid';
+import { v7 as uuidv7 } from 'uuid';
 import type { SqliteStorage } from '../storage/SqliteStorage.js';
 import type {
   EpisodicMemory as EpisodicMemoryType,
@@ -31,7 +31,7 @@ export class EpisodicMemory {
     const { valence, arousal } = this.calculateEmotionalValues(input);
 
     const episode: EpisodicMemoryType = {
-      id: uuidv4(),
+      id: uuidv7(),
       timestamp: now,
       type: input.type,
       summary: input.summary,

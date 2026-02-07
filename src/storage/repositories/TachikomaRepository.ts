@@ -13,7 +13,7 @@ import type {
   SyncHistoryEntry,
   SyncType,
 } from '../../memory/types.js';
-import { v4 as uuidv4 } from 'uuid';
+import { v7 as uuidv7 } from 'uuid';
 
 export class TachikomaRepository extends BaseRepository {
   private activeTachikomaId: TachikomaId | null = null;
@@ -91,7 +91,7 @@ export class TachikomaRepository extends BaseRepository {
     }
 
     // Create new profile
-    const tachikomaId = id || `tachikoma_${uuidv4()}`;
+    const tachikomaId = id || `tachikoma_${uuidv7()}`;
     const now = Date.now();
 
     const profile: TachikomaProfile = {

@@ -165,6 +165,10 @@ describe('WorkflowManager', () => {
     });
     await memoryManager.ready();
 
+    // Increase working memory capacity for workflow tests
+    // Each workflow stores 1 workflow item + N step items
+    memoryManager.working.setCapacity(100);
+
     // Initialize components
     adapter = new TestStorageAdapter(memoryManager);
     executor = new TestStepExecutor();
