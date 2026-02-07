@@ -280,7 +280,11 @@ export class MemoryManager {
   }
 
   /**
-   * Smart recall with relevance scoring
+   * Smart recall with relevance scoring and optional spreading activation.
+   *
+   * Spreading activation mimics human associative memory: when an entity is activated,
+   * related entities are also partially activated based on relation strength and distance.
+   * This allows searching for "authentication" to also return "JWT", "OAuth" entities.
    */
   smartRecall(query: string, options?: {
     includeWorking?: boolean;
@@ -290,6 +294,12 @@ export class MemoryManager {
     recencyWeight?: number;
     importanceWeight?: number;
     confidenceWeight?: number;
+    /** Enable spreading activation through semantic relations graph */
+    spreadingActivation?: boolean;
+    /** Decay factor per hop in spreading activation (default: 0.5) */
+    activationDecay?: number;
+    /** Maximum hops for spreading activation (default: 2) */
+    maxSpreadingHops?: number;
   }): ScoredRecallResult {
     const {
       includeWorking = true,
@@ -299,6 +309,9 @@ export class MemoryManager {
       recencyWeight = 0.3,
       importanceWeight = 0.4,
       confidenceWeight = 0.3,
+      spreadingActivation = true,
+      activationDecay = 0.5,
+      maxSpreadingHops = 2,
     } = options || {};
 
     const result: ScoredRecallResult = {
@@ -380,37 +393,110 @@ export class MemoryManager {
     // Score semantic entities
     if (includeSemantic) {
       const entities = this.semantic.search({ query, limit: limit * 2 });
-      result.semantic = entities
-        .map(entity => {
-          const textMatch = this.calculateTextMatch(queryTerms, [
-            entity.name.toLowerCase(),
-            entity.description.toLowerCase(),
-            ...entity.tags.map(t => t.toLowerCase()),
-            ...entity.observations.map(o => o.toLowerCase()),
-          ]);
 
-          // Confidence score
-          const confidenceScore = entity.confidence;
+      // Score helper function
+      const scoreEntity = (entity: SemanticEntity, baseScore?: number): number => {
+        const textMatch = this.calculateTextMatch(queryTerms, [
+          entity.name.toLowerCase(),
+          entity.description.toLowerCase(),
+          ...entity.tags.map(t => t.toLowerCase()),
+          ...entity.observations.map(o => o.toLowerCase()),
+        ]);
 
-          // Freshness score (decays slower than episodic)
-          const ageInMonths = (now - entity.updatedAt) / (30 * 24 * 60 * 60 * 1000);
-          const freshnessScore = Math.pow(0.98, ageInMonths);
+        // Confidence score
+        const confidenceScore = entity.confidence;
 
-          // Version maturity (higher versions = more refined)
-          const maturityScore = Math.min(1, entity.version * 0.2);
+        // Freshness score (decays slower than episodic)
+        const ageInMonths = (now - entity.updatedAt) / (30 * 24 * 60 * 60 * 1000);
+        const freshnessScore = Math.pow(0.98, ageInMonths);
 
-          const relevanceScore = textMatch > 0
-            ? (textMatch * 0.4) +
-              (confidenceScore * confidenceWeight) +
-              (freshnessScore * (1 - confidenceWeight) * 0.5) +
-              (maturityScore * 0.1)
-            : 0;
+        // Version maturity (higher versions = more refined)
+        const maturityScore = Math.min(1, entity.version * 0.2);
 
-          return { ...entity, relevanceScore };
-        })
-        .filter(ent => ent.relevanceScore > 0)
-        .sort((a, b) => b.relevanceScore - a.relevanceScore)
-        .slice(0, limit);
+        // If there's a base score from spreading activation, use it as minimum
+        const textScore = textMatch > 0
+          ? (textMatch * 0.4) +
+            (confidenceScore * confidenceWeight) +
+            (freshnessScore * (1 - confidenceWeight) * 0.5) +
+            (maturityScore * 0.1)
+          : 0;
+
+        // Return max of text score and base score (from spreading activation)
+        return Math.max(textScore, baseScore || 0);
+      };
+
+      // First pass: score directly matched entities
+      const scoredEntities = new Map<string, { entity: SemanticEntity; relevanceScore: number }>();
+
+      for (const entity of entities) {
+        const score = scoreEntity(entity);
+        if (score > 0) {
+          scoredEntities.set(entity.id, { entity, relevanceScore: score });
+        }
+      }
+
+      // Spreading activation: traverse relations graph
+      if (spreadingActivation && scoredEntities.size > 0) {
+        const activatedEntities = new Map(scoredEntities);
+        const toProcess: Array<{ entityId: string; score: number; hop: number }> = [];
+
+        // Initialize with directly matched entities
+        for (const [id, { relevanceScore }] of scoredEntities) {
+          toProcess.push({ entityId: id, score: relevanceScore, hop: 0 });
+        }
+
+        // BFS through relation graph with decaying activation
+        while (toProcess.length > 0) {
+          const { entityId, score, hop } = toProcess.shift()!;
+
+          // Stop if we've reached max hops
+          if (hop >= maxSpreadingHops) continue;
+
+          // Get related entities with their relation strengths
+          const relatedWithStrength = this.semantic.getRelatedWithStrength(entityId);
+
+          for (const { entity: related, strength } of relatedWithStrength) {
+            // Calculate activation score: parent score * relation strength * decay per hop
+            const activationScore = score * strength * Math.pow(activationDecay, hop + 1);
+
+            // Skip if activation is too weak
+            if (activationScore < 0.05) continue;
+
+            const existing = activatedEntities.get(related.id);
+            if (existing) {
+              // Keep the higher score
+              if (activationScore > existing.relevanceScore) {
+                existing.relevanceScore = activationScore;
+              }
+            } else {
+              // Add new activated entity
+              activatedEntities.set(related.id, {
+                entity: related,
+                relevanceScore: activationScore,
+              });
+
+              // Continue spreading from this entity
+              toProcess.push({
+                entityId: related.id,
+                score: activationScore,
+                hop: hop + 1,
+              });
+            }
+          }
+        }
+
+        // Convert to array, sort, and limit
+        result.semantic = Array.from(activatedEntities.values())
+          .sort((a, b) => b.relevanceScore - a.relevanceScore)
+          .slice(0, limit)
+          .map(({ entity, relevanceScore }) => ({ ...entity, relevanceScore }));
+      } else {
+        // No spreading activation: just use directly matched entities
+        result.semantic = Array.from(scoredEntities.values())
+          .sort((a, b) => b.relevanceScore - a.relevanceScore)
+          .slice(0, limit)
+          .map(({ entity, relevanceScore }) => ({ ...entity, relevanceScore }));
+      }
     }
 
     return result;

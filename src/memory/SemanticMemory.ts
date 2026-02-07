@@ -168,6 +168,31 @@ export class SemanticMemory {
   }
 
   /**
+   * Get related entities with relation strength (for spreading activation)
+   */
+  getRelatedWithStrength(identifier: string): Array<{ entity: SemanticEntity; strength: number; relationType: string }> {
+    const entity = this.storage.getEntity(identifier);
+    if (!entity) return [];
+
+    const relations = this.storage.getRelations(entity.id);
+    const results: Array<{ entity: SemanticEntity; strength: number; relationType: string }> = [];
+
+    for (const relation of relations) {
+      const relatedId = relation.from === entity.id ? relation.to : relation.from;
+      const relatedEntity = this.storage.getEntity(relatedId);
+      if (relatedEntity) {
+        results.push({
+          entity: relatedEntity,
+          strength: relation.strength,
+          relationType: relation.relationType,
+        });
+      }
+    }
+
+    return results;
+  }
+
+  /**
    * Get entities by type
    */
   getByType(type: SemanticEntity['type'], limit?: number): SemanticEntity[] {

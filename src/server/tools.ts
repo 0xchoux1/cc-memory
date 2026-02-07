@@ -226,6 +226,12 @@ export const SmartRecallSchema = z.object({
     .describe('Weight for importance in scoring (0-1)'),
   confidence_weight: z.number().min(0).max(1).optional().default(0.3)
     .describe('Weight for confidence in scoring (0-1)'),
+  spreading_activation: z.boolean().optional().default(true)
+    .describe('Enable spreading activation through semantic relations graph'),
+  activation_decay: z.number().min(0).max(1).optional().default(0.5)
+    .describe('Decay factor per hop in spreading activation (0-1)'),
+  max_spreading_hops: z.number().min(1).max(5).optional().default(2)
+    .describe('Maximum hops for spreading activation (1-5)'),
 });
 
 export const MemoryDecaySchema = z.object({
@@ -849,6 +855,9 @@ export function createToolHandlers(
         recencyWeight: args.recency_weight,
         importanceWeight: args.importance_weight,
         confidenceWeight: args.confidence_weight,
+        spreadingActivation: args.spreading_activation,
+        activationDecay: args.activation_decay,
+        maxSpreadingHops: args.max_spreading_hops,
       });
       return {
         success: true,
