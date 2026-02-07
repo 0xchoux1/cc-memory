@@ -109,6 +109,18 @@ export class SqliteStorage {
     this.searchManager.setSaveCallback(() => this.markDirty());
     this.searchManager.initialize();
 
+    // Auto-rebuild search index if empty but data exists
+    const indexStats = this.searchManager.getStats();
+    if (indexStats.totalTerms === 0) {
+      const dataExists = this.db.exec('SELECT COUNT(*) FROM episodic_memory')[0]?.values[0][0] as number
+        + (this.db.exec('SELECT COUNT(*) FROM semantic_entities')[0]?.values[0][0] as number);
+      if (dataExists > 0) {
+        console.log(`[SqliteStorage] Search index empty with ${dataExists} records, rebuilding...`);
+        this.rebuildSearchIndex();
+        console.log(`[SqliteStorage] Search index rebuilt: ${this.searchManager.getStats().totalTerms} terms indexed`);
+      }
+    }
+
     this.initialized = true;
   }
 
@@ -2135,6 +2147,7 @@ export class SqliteStorage {
         sql += ` AND id IN (${placeholders})`;
         params.push(...ids);
       } else {
+        // No results found in index
         sql += ' AND 1=0';
       }
     }
@@ -2276,6 +2289,7 @@ export class SqliteStorage {
         sql += ` AND id IN (${placeholders})`;
         params.push(...ids);
       } else {
+        // No results found in index
         sql += ' AND 1=0';
       }
     }
@@ -2425,6 +2439,7 @@ export class SqliteStorage {
         sql += ` AND id IN (${placeholders})`;
         params.push(...ids);
       } else {
+        // No results found in index
         sql += ' AND 1=0';
       }
     }
