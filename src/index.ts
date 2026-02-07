@@ -70,6 +70,9 @@ import {
   WisdomGetSchema,
   WisdomSearchSchema,
   WisdomApplySchema,
+  // DIKW Pipeline tools
+  DIKWAnalyzeSchema,
+  DIKWAutoPromoteSchema,
   // Unified high-level tools
   UnifiedMemoryStoreSchema,
   UnifiedMemoryUpdateSchema,
@@ -780,6 +783,27 @@ server.tool(
   WisdomApplySchema.shape,
   async (args) => {
     const result = handlers.wisdom_apply(args as z.infer<typeof WisdomApplySchema>);
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+// DIKW Pipeline Tools
+server.tool(
+  'dikw_analyze',
+  'Analyze episodes to detect pattern, insight, and wisdom candidates automatically',
+  DIKWAnalyzeSchema.shape,
+  async (args) => {
+    const result = handlers.dikw_analyze(args as z.infer<typeof DIKWAnalyzeSchema>);
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  'dikw_auto_promote',
+  'Automatically create patterns, insights, and wisdom from detected candidates',
+  DIKWAutoPromoteSchema.shape,
+  async (args) => {
+    const result = handlers.dikw_auto_promote(args as z.infer<typeof DIKWAutoPromoteSchema>);
     return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
   }
 );

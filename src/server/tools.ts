@@ -591,6 +591,36 @@ export const WisdomApplySchema = z.object({
 });
 
 // ============================================================================
+// DIKW Pipeline Schemas
+// ============================================================================
+
+export const DIKWAnalyzeSchema = z.object({
+  min_episodes_for_pattern: z.number().optional().default(3)
+    .describe('Minimum episodes with same tags to suggest a pattern'),
+  tag_overlap_threshold: z.number().min(0).max(1).optional().default(0.5)
+    .describe('Minimum tag overlap ratio to consider episodes similar'),
+  min_frequency_for_insight: z.number().optional().default(3)
+    .describe('Minimum pattern frequency to suggest an insight'),
+  min_successes_for_wisdom: z.number().optional().default(3)
+    .describe('Minimum successful applications to suggest wisdom'),
+  max_episode_age_days: z.number().optional().default(30)
+    .describe('Maximum age in days to consider for pattern detection'),
+});
+
+export const DIKWAutoPromoteSchema = z.object({
+  auto_create_patterns: z.boolean().optional().default(true)
+    .describe('Automatically create patterns from candidates'),
+  auto_create_insights: z.boolean().optional().default(true)
+    .describe('Automatically create insights from high-frequency patterns'),
+  auto_create_wisdom: z.boolean().optional().default(true)
+    .describe('Automatically create wisdom from validated insights'),
+  min_confidence: z.number().min(0).max(1).optional().default(0.6)
+    .describe('Minimum confidence threshold for auto-creation'),
+  dry_run: z.boolean().optional().default(false)
+    .describe('If true, only report what would be created without creating'),
+});
+
+// ============================================================================
 // Shared Memory Schemas (Multi-Agent)
 // ============================================================================
 
@@ -1488,6 +1518,107 @@ export function createToolHandlers(
     },
 
     // ============================================================================
+    // DIKW Pipeline Tools
+    // ============================================================================
+
+    dikw_analyze: (args: z.infer<typeof DIKWAnalyzeSchema>) => {
+      const { DIKWPipeline } = require('../dikw/DIKWPipeline.js');
+      const pipeline = new DIKWPipeline(storage, {
+        minEpisodesForPattern: args.min_episodes_for_pattern,
+        tagOverlapThreshold: args.tag_overlap_threshold,
+        minFrequencyForInsight: args.min_frequency_for_insight,
+        minSuccessesForWisdom: args.min_successes_for_wisdom,
+        maxEpisodeAgeDays: args.max_episode_age_days,
+      });
+
+      const result = pipeline.analyze();
+      return {
+        success: true,
+        patternCandidates: result.patternCandidates,
+        insightCandidates: result.insightCandidates,
+        wisdomCandidates: result.wisdomCandidates,
+        stats: result.stats,
+      };
+    },
+
+    dikw_auto_promote: (args: z.infer<typeof DIKWAutoPromoteSchema>) => {
+      const { DIKWPipeline } = require('../dikw/DIKWPipeline.js');
+      const pipeline = new DIKWPipeline(storage);
+
+      const analysis = pipeline.analyze();
+      const created = {
+        patterns: [] as any[],
+        insights: [] as any[],
+        wisdom: [] as any[],
+      };
+      const skipped = {
+        patterns: 0,
+        insights: 0,
+        wisdom: 0,
+      };
+
+      // Auto-create patterns
+      if (args.auto_create_patterns) {
+        for (const candidate of analysis.patternCandidates) {
+          if (candidate.confidence >= args.min_confidence) {
+            if (!args.dry_run) {
+              const pattern = pipeline.createPatternFromCandidate(candidate);
+              created.patterns.push(pattern);
+            } else {
+              created.patterns.push({ candidate, wouldCreate: true });
+            }
+          } else {
+            skipped.patterns++;
+          }
+        }
+      }
+
+      // Auto-create insights
+      if (args.auto_create_insights) {
+        for (const candidate of analysis.insightCandidates) {
+          if (candidate.confidence >= args.min_confidence) {
+            if (!args.dry_run) {
+              const insight = pipeline.createInsightFromCandidate(candidate);
+              created.insights.push(insight);
+            } else {
+              created.insights.push({ candidate, wouldCreate: true });
+            }
+          } else {
+            skipped.insights++;
+          }
+        }
+      }
+
+      // Auto-create wisdom
+      if (args.auto_create_wisdom) {
+        for (const candidate of analysis.wisdomCandidates) {
+          if (candidate.confidence >= args.min_confidence) {
+            if (!args.dry_run) {
+              const wisdom = pipeline.createWisdomFromCandidate(candidate);
+              created.wisdom.push(wisdom);
+            } else {
+              created.wisdom.push({ candidate, wouldCreate: true });
+            }
+          } else {
+            skipped.wisdom++;
+          }
+        }
+      }
+
+      return {
+        success: true,
+        dryRun: args.dry_run,
+        created: {
+          patterns: created.patterns.length,
+          insights: created.insights.length,
+          wisdom: created.wisdom.length,
+        },
+        skipped,
+        details: created,
+      };
+    },
+
+    // ============================================================================
     // Shared Memory Tools (Multi-Agent)
     // Uses team-shared storage if available, otherwise falls back to individual storage
     // ============================================================================
@@ -1934,6 +2065,17 @@ export const toolDefinitions = [
     name: 'wisdom_apply',
     description: 'Record wisdom application result',
     inputSchema: WisdomApplySchema,
+  },
+  // DIKW Pipeline Tools
+  {
+    name: 'dikw_analyze',
+    description: 'Analyze episodes to detect pattern, insight, and wisdom candidates automatically',
+    inputSchema: DIKWAnalyzeSchema,
+  },
+  {
+    name: 'dikw_auto_promote',
+    description: 'Automatically create patterns, insights, and wisdom from detected candidates',
+    inputSchema: DIKWAutoPromoteSchema,
   },
   // Shared Memory Tools (Multi-Agent)
   {
