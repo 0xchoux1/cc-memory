@@ -143,7 +143,7 @@ export interface EpisodeQuery {
 // Semantic Memory Types
 // ============================================================================
 
-export type SemanticEntityType = 'procedure' | 'fact' | 'config' | 'preference' | 'pattern' | 'skill';
+export type SemanticEntityType = 'procedure' | 'fact' | 'config' | 'preference' | 'pattern' | 'skill' | 'goal';
 export type EntitySource = 'user' | 'inferred' | 'system';
 
 export interface Procedure {
@@ -642,4 +642,61 @@ export interface SyncHistoryEntry {
   conflictsCount: number;
   syncVector: SyncVector;
   createdAt: number;
+}
+
+// ============================================================================
+// Goal Tracking Types (P5)
+// ============================================================================
+
+export type GoalStatus = 'active' | 'completed' | 'abandoned';
+
+export interface GoalContent {
+  /** Description of the goal */
+  description: string;
+  /** Success criteria for the goal */
+  successCriteria: string[];
+  /** Optional deadline timestamp */
+  deadline?: number;
+  /** Current status */
+  status: GoalStatus;
+  /** Progress percentage (0-100) */
+  progress: number;
+  /** Related episode IDs that contribute to this goal */
+  relatedEpisodes: string[];
+  /** Keywords for searching related episodes */
+  keywords: string[];
+  /** Last time progress was checked */
+  lastChecked: number;
+}
+
+export interface GoalInput {
+  /** Name/title of the goal */
+  name: string;
+  /** Description of what needs to be achieved */
+  description: string;
+  /** Criteria that define success */
+  successCriteria: string[];
+  /** Optional deadline */
+  deadline?: number;
+  /** Keywords to search for related episodes */
+  keywords?: string[];
+  /** Tags for categorization */
+  tags?: string[];
+}
+
+export interface GoalProgress {
+  /** Goal ID */
+  goalId: string;
+  /** Goal name */
+  name: string;
+  /** Current status */
+  status: GoalStatus;
+  /** Progress percentage (0-100) */
+  progress: number;
+  /** Number of related episodes found */
+  relatedEpisodeCount: number;
+  /** Summary of recent activity */
+  recentActivity: string[];
+  /** Estimated completion based on trajectory */
+  estimatedCompletion?: 'on_track' | 'at_risk' | 'behind' | 'completed';
 }

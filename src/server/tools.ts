@@ -347,6 +347,45 @@ export const UnifiedMemoryForgetSchema = z.object({
 });
 
 // ============================================================================
+// Goal Tracking Schemas (P5)
+// ============================================================================
+
+export const GoalCreateSchema = z.object({
+  name: z.string().describe('Name/title of the goal'),
+  description: z.string().describe('Description of what needs to be achieved'),
+  success_criteria: z.array(z.string()).describe('Criteria that define success'),
+  deadline: z.number().optional().describe('Optional deadline timestamp'),
+  keywords: z.array(z.string()).optional()
+    .describe('Keywords to search for related episodes (auto-extracted if not provided)'),
+  tags: z.array(z.string()).optional().describe('Tags for categorization'),
+});
+
+export const GoalGetSchema = z.object({
+  goal_id: z.string().describe('Goal ID'),
+});
+
+export const GoalListSchema = z.object({
+  status: z.enum(['active', 'completed', 'abandoned']).optional()
+    .describe('Filter by status'),
+  limit: z.number().optional().default(50)
+    .describe('Maximum number of goals to return'),
+});
+
+export const GoalCheckSchema = z.object({
+  goal_id: z.string().describe('Goal ID to check progress for'),
+});
+
+export const GoalUpdateStatusSchema = z.object({
+  goal_id: z.string().describe('Goal ID'),
+  status: z.enum(['active', 'completed', 'abandoned']).describe('New status'),
+});
+
+export const GoalAddNoteSchema = z.object({
+  goal_id: z.string().describe('Goal ID'),
+  note: z.string().describe('Note to add'),
+});
+
+// ============================================================================
 // Tachikoma Parallelization Schemas
 // ============================================================================
 
@@ -990,6 +1029,53 @@ export function createToolHandlers(
         episodes_compressed: result.episodesCompressed,
         summaries_created: result.summariesCreated,
       };
+    },
+
+    // Goal Tracking (P5)
+    goal_create: (args: z.infer<typeof GoalCreateSchema>) => {
+      const goal = memoryManager.createGoal({
+        name: args.name,
+        description: args.description,
+        successCriteria: args.success_criteria,
+        deadline: args.deadline,
+        keywords: args.keywords,
+        tags: args.tags,
+      });
+      return { success: true, goal };
+    },
+
+    goal_get: (args: z.infer<typeof GoalGetSchema>) => {
+      const goal = memoryManager.getGoal(args.goal_id);
+      if (!goal) {
+        return { success: false, error: 'Goal not found' };
+      }
+      return { success: true, goal };
+    },
+
+    goal_list: (args: z.infer<typeof GoalListSchema>) => {
+      const goals = memoryManager.listGoals({
+        status: args.status,
+        limit: args.limit,
+      });
+      return { success: true, goals, total: goals.length };
+    },
+
+    goal_check: (args: z.infer<typeof GoalCheckSchema>) => {
+      const progress = memoryManager.checkGoalProgress(args.goal_id);
+      if (!progress) {
+        return { success: false, error: 'Goal not found' };
+      }
+      return { success: true, progress };
+    },
+
+    goal_update_status: (args: z.infer<typeof GoalUpdateStatusSchema>) => {
+      const success = memoryManager.updateGoalStatus(args.goal_id, args.status);
+      return { success };
+    },
+
+    goal_add_note: (args: z.infer<typeof GoalAddNoteSchema>) => {
+      const success = memoryManager.addGoalNote(args.goal_id, args.note);
+      return { success };
     },
 
     memory_decay: (args: z.infer<typeof MemoryDecaySchema>) => {

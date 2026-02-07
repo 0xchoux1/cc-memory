@@ -14,6 +14,10 @@ import type {
   WorkingMemoryItem,
   EpisodicMemory as EpisodicMemoryType,
   SemanticEntity,
+  GoalInput,
+  GoalContent,
+  GoalProgress,
+  GoalStatus,
 } from './types.js';
 
 export interface MemoryManagerConfig extends StorageConfig {
@@ -1195,6 +1199,239 @@ export class MemoryManager {
       episodesCompressed,
       summariesCreated,
     };
+  }
+
+  // ============================================================================
+  // Goal Tracking (P5)
+  // ============================================================================
+
+  /**
+   * Create a new goal (P5).
+   *
+   * Goals are stored as semantic entities with type 'goal' and can be
+   * tracked over time by searching for related episodes.
+   *
+   * @param input Goal input data
+   * @returns The created goal entity
+   */
+  createGoal(input: GoalInput): SemanticEntity {
+    const keywords = input.keywords || this.extractKeywords(input.description);
+
+    const content: GoalContent = {
+      description: input.description,
+      successCriteria: input.successCriteria,
+      deadline: input.deadline,
+      status: 'active',
+      progress: 0,
+      relatedEpisodes: [],
+      keywords,
+      lastChecked: Date.now(),
+    };
+
+    return this.semantic.create({
+      name: input.name,
+      type: 'goal',
+      description: input.description,
+      content,
+      tags: [...(input.tags || []), 'goal'],
+      confidence: 1.0,
+      source: 'user',
+    });
+  }
+
+  /**
+   * Extract keywords from a description for goal searching.
+   */
+  private extractKeywords(text: string): string[] {
+    // Simple keyword extraction: split by spaces, filter common words
+    const commonWords = new Set([
+      'the', 'a', 'an', 'and', 'or', 'but', 'is', 'are', 'was', 'were',
+      'to', 'of', 'in', 'for', 'on', 'with', 'as', 'at', 'by', 'from',
+      'this', 'that', 'these', 'those', 'it', 'its', 'be', 'have', 'has',
+      'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may',
+    ]);
+
+    return text
+      .toLowerCase()
+      .split(/\s+/)
+      .filter(word => word.length > 3 && !commonWords.has(word))
+      .slice(0, 10);
+  }
+
+  /**
+   * Get a goal by ID.
+   */
+  getGoal(goalId: string): SemanticEntity | null {
+    const entity = this.semantic.get(goalId);
+    if (entity && entity.type === 'goal') {
+      return entity;
+    }
+    return null;
+  }
+
+  /**
+   * List all goals.
+   */
+  listGoals(options?: {
+    status?: GoalStatus;
+    limit?: number;
+  }): SemanticEntity[] {
+    const { status, limit = 50 } = options || {};
+
+    const goals = this.semantic.search({
+      type: 'goal',
+      limit,
+    });
+
+    if (status) {
+      return goals.filter(g => {
+        const content = g.content as GoalContent | undefined;
+        return content?.status === status;
+      });
+    }
+
+    return goals;
+  }
+
+  /**
+   * Check goal progress by searching for related episodes (P5).
+   *
+   * This method:
+   * 1. Searches for episodes matching the goal's keywords
+   * 2. Updates the goal's related episodes list
+   * 3. Estimates progress based on episode outcomes
+   *
+   * @param goalId Goal ID to check
+   * @returns Goal progress information
+   */
+  checkGoalProgress(goalId: string): GoalProgress | null {
+    const goal = this.getGoal(goalId);
+    if (!goal) return null;
+
+    const content = goal.content as GoalContent;
+    if (!content) return null;
+
+    // Search for related episodes using keywords
+    const keywordQuery = content.keywords.join(' ');
+    const episodes = this.episodic.search({
+      query: keywordQuery,
+      limit: 50,
+    });
+
+    // Also search in tags
+    const tagEpisodes = this.episodic.search({
+      tags: goal.tags,
+      limit: 50,
+    });
+
+    // Combine and deduplicate
+    const allEpisodeIds = new Set<string>();
+    const allEpisodes: EpisodicMemoryType[] = [];
+
+    for (const ep of [...episodes, ...tagEpisodes]) {
+      if (!allEpisodeIds.has(ep.id)) {
+        allEpisodeIds.add(ep.id);
+        allEpisodes.push(ep);
+      }
+    }
+
+    // Update related episodes
+    const relatedEpisodes = allEpisodes.map(e => e.id);
+
+    // Calculate progress based on episodes
+    const successCount = allEpisodes.filter(e =>
+      e.type === 'success' || e.type === 'milestone'
+    ).length;
+    const errorCount = allEpisodes.filter(e =>
+      e.type === 'error' || e.type === 'incident'
+    ).length;
+
+    // Progress heuristic: more successes relative to criteria = more progress
+    const criteriaCount = content.successCriteria.length || 1;
+    const progressPerCriteria = 100 / criteriaCount;
+    const estimatedProgress = Math.min(
+      100,
+      Math.round((successCount / criteriaCount) * progressPerCriteria)
+    );
+
+    // Estimate completion status
+    let estimatedCompletion: GoalProgress['estimatedCompletion'];
+    if (estimatedProgress >= 100) {
+      estimatedCompletion = 'completed';
+    } else if (content.deadline) {
+      const now = Date.now();
+      const remaining = content.deadline - now;
+      const elapsed = now - goal.createdAt;
+      const expectedProgress = elapsed / (elapsed + remaining) * 100;
+
+      if (estimatedProgress >= expectedProgress - 10) {
+        estimatedCompletion = 'on_track';
+      } else if (estimatedProgress >= expectedProgress - 30) {
+        estimatedCompletion = 'at_risk';
+      } else {
+        estimatedCompletion = 'behind';
+      }
+    } else {
+      estimatedCompletion = estimatedProgress > 0 ? 'on_track' : 'at_risk';
+    }
+
+    // Get recent activity (last 5 related episodes)
+    const recentEpisodes = allEpisodes
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, 5);
+    const recentActivity = recentEpisodes.map(e => e.summary);
+
+    // Update the goal entity with new progress
+    const updatedContent: GoalContent = {
+      ...content,
+      progress: estimatedProgress,
+      relatedEpisodes,
+      lastChecked: Date.now(),
+      status: estimatedProgress >= 100 ? 'completed' : content.status,
+    };
+
+    this.semantic.update(goalId, {
+      content: updatedContent,
+    });
+
+    return {
+      goalId,
+      name: goal.name,
+      status: updatedContent.status,
+      progress: estimatedProgress,
+      relatedEpisodeCount: relatedEpisodes.length,
+      recentActivity,
+      estimatedCompletion,
+    };
+  }
+
+  /**
+   * Update goal status.
+   */
+  updateGoalStatus(goalId: string, status: GoalStatus): boolean {
+    const goal = this.getGoal(goalId);
+    if (!goal) return false;
+
+    const content = goal.content as GoalContent;
+    if (!content) return false;
+
+    const updatedContent: GoalContent = {
+      ...content,
+      status,
+      progress: status === 'completed' ? 100 : content.progress,
+    };
+
+    return this.semantic.update(goalId, { content: updatedContent });
+  }
+
+  /**
+   * Add observation to a goal (notes, updates, etc.)
+   */
+  addGoalNote(goalId: string, note: string): boolean {
+    const goal = this.getGoal(goalId);
+    if (!goal) return false;
+
+    return this.semantic.addObservation(goalId, note);
   }
 
   /**

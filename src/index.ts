@@ -40,6 +40,12 @@ import {
   MergeEpisodesSchema,
   ClusterEpisodesSchema,
   CompressMemoriesSchema,
+  GoalCreateSchema,
+  GoalGetSchema,
+  GoalListSchema,
+  GoalCheckSchema,
+  GoalUpdateStatusSchema,
+  GoalAddNoteSchema,
   MemoryDecaySchema,
   MemoryBoostSchema,
   // Tachikoma & Agent & Wisdom schemas
@@ -478,6 +484,67 @@ server.tool(
   CompressMemoriesSchema.shape,
   async (args) => {
     const result = handlers.compress_memories(args as z.infer<typeof CompressMemoriesSchema>);
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+// Goal Tracking Tools (P5)
+server.tool(
+  'goal_create',
+  'Create a new goal with success criteria',
+  GoalCreateSchema.shape,
+  async (args) => {
+    const result = handlers.goal_create(args as z.infer<typeof GoalCreateSchema>);
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  'goal_get',
+  'Get a goal by ID',
+  GoalGetSchema.shape,
+  async (args) => {
+    const result = handlers.goal_get(args as z.infer<typeof GoalGetSchema>);
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  'goal_list',
+  'List all goals',
+  GoalListSchema.shape,
+  async (args) => {
+    const result = handlers.goal_list(args as z.infer<typeof GoalListSchema>);
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  'goal_check',
+  'Check goal progress by searching for related episodes',
+  GoalCheckSchema.shape,
+  async (args) => {
+    const result = handlers.goal_check(args as z.infer<typeof GoalCheckSchema>);
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  'goal_update_status',
+  'Update goal status (active, completed, abandoned)',
+  GoalUpdateStatusSchema.shape,
+  async (args) => {
+    const result = handlers.goal_update_status(args as z.infer<typeof GoalUpdateStatusSchema>);
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  'goal_add_note',
+  'Add a note/observation to a goal',
+  GoalAddNoteSchema.shape,
+  async (args) => {
+    const result = handlers.goal_add_note(args as z.infer<typeof GoalAddNoteSchema>);
     return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
   }
 );
