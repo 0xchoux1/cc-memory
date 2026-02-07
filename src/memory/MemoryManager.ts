@@ -11,6 +11,7 @@ import type {
   StorageConfig,
   MemoryStats,
   MemoryExport,
+  MemoryDashboard,
   WorkingMemoryItem,
   EpisodicMemory as EpisodicMemoryType,
   SemanticEntity,
@@ -246,6 +247,126 @@ export class MemoryManager {
    */
   getStats(): MemoryStats {
     return this.storage.getStats();
+  }
+
+  /**
+   * Get memory dashboard with comprehensive statistics and insights
+   *
+   * The dashboard provides:
+   * - Top 5 most accessed memories (episodic only, as semantic doesn't track access)
+   * - Entity/episode counts by type
+   * - Recent additions (last 5)
+   * - Memories near decay threshold (importance < 3)
+   * - Orphaned entities (no relations)
+   * - Knowledge graph density metrics
+   */
+  getDashboard(): MemoryDashboard {
+    const stats = this.getStats();
+    const now = Date.now();
+
+    // Get all data for analysis
+    const allEpisodes = this.storage.searchEpisodes({});
+    const allEntities = this.storage.searchEntities({});
+    const exportData = this.storage.export();
+    const allRelations = exportData.semantic.relations;
+    const workingItems = this.working.list();
+
+    // Top 5 most accessed memories (episodic only - semantic doesn't track accessCount)
+    const topAccessed = allEpisodes
+      .filter(e => e.accessCount > 0)
+      .map(e => ({
+        type: 'episodic' as const,
+        id: e.id,
+        name: e.summary,
+        accessCount: e.accessCount,
+        lastAccessed: e.lastAccessed || e.timestamp,
+      }))
+      .sort((a, b) => b.accessCount - a.accessCount)
+      .slice(0, 5);
+
+    // Counts by type
+    const countsByType = {
+      episodic: stats.episodic.byType as Record<string, number>,
+      semantic: stats.semantic.byType as Record<string, number>,
+    };
+
+    // Recent additions (last 5 across all types)
+    const recentWorking = workingItems.map(w => ({
+      type: 'working' as const,
+      id: w.id,
+      name: w.key,
+      createdAt: w.metadata.createdAt,
+    }));
+
+    const recentEpisodic = allEpisodes.map(e => ({
+      type: 'episodic' as const,
+      id: e.id,
+      name: e.summary,
+      createdAt: e.timestamp,
+    }));
+
+    const recentSemantic = allEntities.map(e => ({
+      type: 'semantic' as const,
+      id: e.id,
+      name: e.name,
+      createdAt: e.createdAt,
+    }));
+
+    const recentAdditions = [...recentWorking, ...recentEpisodic, ...recentSemantic]
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .slice(0, 5);
+
+    // Memories near decay threshold (importance < 3)
+    const nearDecayThreshold = allEpisodes
+      .filter(e => e.importance < 3)
+      .map(e => ({
+        type: 'episodic' as const,
+        id: e.id,
+        summary: e.summary,
+        importance: e.importance,
+      }))
+      .sort((a, b) => a.importance - b.importance)
+      .slice(0, 10);
+
+    // Orphaned entities (no incoming or outgoing relations)
+    const connectedEntityIds = new Set<string>();
+    for (const rel of allRelations) {
+      connectedEntityIds.add(rel.from);
+      connectedEntityIds.add(rel.to);
+    }
+
+    const orphanedEntities = allEntities
+      .filter(e => !connectedEntityIds.has(e.id))
+      .map(e => ({
+        id: e.id,
+        name: e.name,
+        type: e.type,
+      }))
+      .slice(0, 10);
+
+    // Knowledge graph statistics
+    const totalNodes = allEntities.length;
+    const totalEdges = allRelations.length;
+    const averageDegree = totalNodes > 0 ? (2 * totalEdges) / totalNodes : 0;
+    // Density = actual edges / max possible edges (for undirected graph: n*(n-1)/2)
+    const maxPossibleEdges = totalNodes > 1 ? (totalNodes * (totalNodes - 1)) / 2 : 0;
+    const density = maxPossibleEdges > 0 ? totalEdges / maxPossibleEdges : 0;
+
+    return {
+      topAccessed,
+      countsByType,
+      recentAdditions,
+      nearDecayThreshold,
+      orphanedEntities,
+      graphStats: {
+        totalNodes,
+        totalEdges,
+        averageDegree: Math.round(averageDegree * 100) / 100,
+        density: Math.round(density * 1000) / 1000,
+      },
+      stats,
+      generatedAt: now,
+    };
   }
 
   /**

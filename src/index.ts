@@ -876,6 +876,21 @@ server.resource(
   }
 );
 
+server.resource(
+  'memory://dashboard',
+  'memory://dashboard',
+  async () => {
+    const dashboard = memoryManager.getDashboard();
+    return {
+      contents: [{
+        uri: 'memory://dashboard',
+        mimeType: 'application/json',
+        text: JSON.stringify(dashboard, null, 2),
+      }],
+    };
+  }
+);
+
 // Register prompts
 server.prompt(
   'recall_context',

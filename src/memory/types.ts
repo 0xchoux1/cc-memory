@@ -227,6 +227,53 @@ export interface MemoryStats {
   };
 }
 
+export interface MemoryDashboard {
+  /** Top N most frequently accessed memories */
+  topAccessed: Array<{
+    type: 'episodic' | 'semantic';
+    id: string;
+    name: string;
+    accessCount: number;
+    lastAccessed: number;
+  }>;
+  /** Entity/episode counts by type */
+  countsByType: {
+    episodic: Record<string, number>;
+    semantic: Record<string, number>;
+  };
+  /** Recently added items */
+  recentAdditions: Array<{
+    type: 'working' | 'episodic' | 'semantic';
+    id: string;
+    name: string;
+    createdAt: number;
+  }>;
+  /** Memories near decay threshold (importance < 3) */
+  nearDecayThreshold: Array<{
+    type: 'episodic';
+    id: string;
+    summary: string;
+    importance: number;
+  }>;
+  /** Orphaned semantic entities (no relations) */
+  orphanedEntities: Array<{
+    id: string;
+    name: string;
+    type: string;
+  }>;
+  /** Knowledge graph statistics */
+  graphStats: {
+    totalNodes: number;
+    totalEdges: number;
+    averageDegree: number;
+    density: number;
+  };
+  /** General statistics */
+  stats: MemoryStats;
+  /** Dashboard generation timestamp */
+  generatedAt: number;
+}
+
 export interface MemoryExport {
   version: string;
   exportedAt: number;
