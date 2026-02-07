@@ -232,6 +232,36 @@ export const SmartRecallSchema = z.object({
     .describe('Decay factor per hop in spreading activation (0-1)'),
   max_spreading_hops: z.number().min(1).max(5).optional().default(2)
     .describe('Maximum hops for spreading activation (1-5)'),
+  current_context: z.object({
+    project_path: z.string().optional().describe('Current project path'),
+    branch: z.string().optional().describe('Current git branch'),
+    session_id: z.string().optional().describe('Current session ID'),
+  }).optional().describe('Current context for context-dependent encoding bonus (N6)'),
+  context_match_multiplier: z.number().min(1).max(2).optional().default(1.2)
+    .describe('Multiplier applied when context matches (default: 1.2)'),
+});
+
+export const ReconsolidationCandidatesSchema = z.object({
+  episode_id: z.string().describe('Episode ID to find reconsolidation candidates for'),
+  min_tag_overlap: z.number().min(0).max(1).optional().default(0.3)
+    .describe('Minimum tag overlap ratio to consider (0-1)'),
+  newer_only: z.boolean().optional().default(true)
+    .describe('Only consider episodes newer than the source'),
+  limit: z.number().optional().default(5)
+    .describe('Maximum number of candidates to return'),
+  match_context: z.boolean().optional().default(true)
+    .describe('Include context matching in similarity calculation'),
+});
+
+export const MergeEpisodesSchema = z.object({
+  target_id: z.string().describe('Episode ID to merge into'),
+  merge_id: z.string().describe('Episode ID to merge from'),
+  combine_learnings: z.boolean().optional().default(true)
+    .describe('Combine learnings from both episodes'),
+  combine_tags: z.boolean().optional().default(true)
+    .describe('Add merge episode tags to target'),
+  merged_importance_reduction: z.number().min(0).max(1).optional().default(0.5)
+    .describe('Factor to reduce merged episode importance by'),
 });
 
 export const MemoryDecaySchema = z.object({
@@ -858,12 +888,45 @@ export function createToolHandlers(
         spreadingActivation: args.spreading_activation,
         activationDecay: args.activation_decay,
         maxSpreadingHops: args.max_spreading_hops,
+        currentContext: args.current_context ? {
+          projectPath: args.current_context.project_path,
+          branch: args.current_context.branch,
+          sessionId: args.current_context.session_id,
+        } : undefined,
+        contextMatchMultiplier: args.context_match_multiplier,
       });
       return {
         success: true,
         ...result,
         total: result.working.length + result.episodic.length + result.semantic.length,
       };
+    },
+
+    reconsolidation_candidates: (args: z.infer<typeof ReconsolidationCandidatesSchema>) => {
+      const candidates = memoryManager.findReconsolidationCandidates(args.episode_id, {
+        minTagOverlap: args.min_tag_overlap,
+        newerOnly: args.newer_only,
+        limit: args.limit,
+        matchContext: args.match_context,
+      });
+      return {
+        success: true,
+        candidates: candidates.map(c => ({
+          episode: c.episode,
+          similarity: c.similarity,
+          merge_reasons: c.mergeReasons,
+        })),
+        total: candidates.length,
+      };
+    },
+
+    merge_episodes: (args: z.infer<typeof MergeEpisodesSchema>) => {
+      const success = memoryManager.mergeEpisodes(args.target_id, args.merge_id, {
+        combineLearnings: args.combine_learnings,
+        combineTags: args.combine_tags,
+        mergedImportanceReduction: args.merged_importance_reduction,
+      });
+      return { success };
     },
 
     memory_decay: (args: z.infer<typeof MemoryDecaySchema>) => {

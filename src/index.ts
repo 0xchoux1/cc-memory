@@ -36,6 +36,8 @@ import {
   MemoryImportSchema,
   MemoryExportSchema,
   SmartRecallSchema,
+  ReconsolidationCandidatesSchema,
+  MergeEpisodesSchema,
   MemoryDecaySchema,
   MemoryBoostSchema,
   // Tachikoma & Agent & Wisdom schemas
@@ -430,10 +432,30 @@ server.tool(
 
 server.tool(
   'smart_recall',
-  'Intelligent recall with relevance scoring across all memory layers',
+  'Intelligent recall with relevance scoring, spreading activation, and context-dependent encoding bonus',
   SmartRecallSchema.shape,
   async (args) => {
     const result = handlers.smart_recall(args as z.infer<typeof SmartRecallSchema>);
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  'reconsolidation_candidates',
+  'Find episodes that could be merged with a given episode (reconsolidation)',
+  ReconsolidationCandidatesSchema.shape,
+  async (args) => {
+    const result = handlers.reconsolidation_candidates(args as z.infer<typeof ReconsolidationCandidatesSchema>);
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  'merge_episodes',
+  'Merge two episodes into one (reconsolidation)',
+  MergeEpisodesSchema.shape,
+  async (args) => {
+    const result = handlers.merge_episodes(args as z.infer<typeof MergeEpisodesSchema>);
     return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
   }
 );

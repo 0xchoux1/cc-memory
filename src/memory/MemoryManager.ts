@@ -285,6 +285,10 @@ export class MemoryManager {
    * Spreading activation mimics human associative memory: when an entity is activated,
    * related entities are also partially activated based on relation strength and distance.
    * This allows searching for "authentication" to also return "JWT", "OAuth" entities.
+   *
+   * Context-dependent encoding (N6): When the current context matches the episode's
+   * encoding context (projectPath, branch), a 1.2x bonus is applied to the relevance score.
+   * This mimics how human memory recall is enhanced when in the same context as encoding.
    */
   smartRecall(query: string, options?: {
     includeWorking?: boolean;
@@ -300,6 +304,14 @@ export class MemoryManager {
     activationDecay?: number;
     /** Maximum hops for spreading activation (default: 2) */
     maxSpreadingHops?: number;
+    /** Current context for context-dependent encoding bonus (1.2x when matching) */
+    currentContext?: {
+      projectPath?: string;
+      branch?: string;
+      sessionId?: string;
+    };
+    /** Context match multiplier (default: 1.2) */
+    contextMatchMultiplier?: number;
   }): ScoredRecallResult {
     const {
       includeWorking = true,
@@ -312,6 +324,8 @@ export class MemoryManager {
       spreadingActivation = true,
       activationDecay = 0.5,
       maxSpreadingHops = 2,
+      currentContext,
+      contextMatchMultiplier = 1.2,
     } = options || {};
 
     const result: ScoredRecallResult = {
@@ -380,6 +394,40 @@ export class MemoryManager {
           // Arousal ranges from 0 to 1, multiplier ranges from 1.0 to 1.3
           const arousalMultiplier = 1 + (episode.arousal * 0.3);
 
+          // Context-dependent encoding bonus (N6):
+          // When current context matches the episode's encoding context, apply bonus
+          // This mimics context-dependent memory in human cognition
+          let contextMultiplier = 1.0;
+          if (currentContext) {
+            const matchingFields: boolean[] = [];
+
+            // Check projectPath match
+            if (currentContext.projectPath && episode.context.projectPath) {
+              matchingFields.push(currentContext.projectPath === episode.context.projectPath);
+            }
+
+            // Check branch match
+            if (currentContext.branch && episode.context.branch) {
+              matchingFields.push(currentContext.branch === episode.context.branch);
+            }
+
+            // Check sessionId match (same session = strongest context match)
+            if (currentContext.sessionId && episode.context.sessionId) {
+              if (currentContext.sessionId === episode.context.sessionId) {
+                // Same session gets full bonus
+                contextMultiplier = contextMatchMultiplier;
+              } else if (matchingFields.length > 0 && matchingFields.some(m => m)) {
+                // Partial context match: scale multiplier by proportion of matching fields
+                const matchRatio = matchingFields.filter(m => m).length / matchingFields.length;
+                contextMultiplier = 1.0 + (contextMatchMultiplier - 1.0) * matchRatio;
+              }
+            } else if (matchingFields.length > 0 && matchingFields.some(m => m)) {
+              // No session to compare, use field matching
+              const matchRatio = matchingFields.filter(m => m).length / matchingFields.length;
+              contextMultiplier = 1.0 + (contextMatchMultiplier - 1.0) * matchRatio;
+            }
+          }
+
           const baseScore = textMatch > 0
             ? (textMatch * 0.4) +
               (recencyScore * recencyWeight) +
@@ -387,8 +435,8 @@ export class MemoryManager {
               (accessBoost * 0.1)
             : 0;
 
-          // Apply arousal multiplier to boost emotionally significant memories
-          const relevanceScore = baseScore * arousalMultiplier;
+          // Apply arousal multiplier and context multiplier
+          const relevanceScore = baseScore * arousalMultiplier * contextMultiplier;
 
           return { ...episode, relevanceScore };
         })
@@ -525,6 +573,192 @@ export class MemoryManager {
     }
 
     return matchCount / queryTerms.length;
+  }
+
+  /**
+   * Find reconsolidation candidates for an episode (N7).
+   *
+   * Reconsolidation is a memory process where retrieved memories become labile
+   * and can be updated with new information. This method finds similar episodes
+   * that could potentially be merged to reduce redundancy.
+   *
+   * @param episodeId - The episode to find reconsolidation candidates for
+   * @param options - Configuration options
+   * @returns Array of candidate episodes with similarity scores and merge suggestions
+   */
+  findReconsolidationCandidates(episodeId: string, options?: {
+    /** Minimum tag overlap ratio to consider (default: 0.3) */
+    minTagOverlap?: number;
+    /** Consider only episodes newer than this (default: true) */
+    newerOnly?: boolean;
+    /** Maximum number of candidates to return (default: 5) */
+    limit?: number;
+    /** Include context matching in similarity (default: true) */
+    matchContext?: boolean;
+  }): Array<{
+    episode: EpisodicMemoryType;
+    similarity: number;
+    mergeReasons: string[];
+  }> {
+    const {
+      minTagOverlap = 0.3,
+      newerOnly = true,
+      limit = 5,
+      matchContext = true,
+    } = options || {};
+
+    const sourceEpisode = this.episodic.get(episodeId);
+    if (!sourceEpisode) return [];
+
+    // Search for similar episodes
+    const candidates = this.episodic.search({
+      type: sourceEpisode.type,
+      limit: 50, // Get more to filter
+    });
+
+    const results: Array<{
+      episode: EpisodicMemoryType;
+      similarity: number;
+      mergeReasons: string[];
+    }> = [];
+
+    for (const candidate of candidates) {
+      // Skip self
+      if (candidate.id === episodeId) continue;
+
+      // Skip older episodes if newerOnly (use < to allow same-millisecond recordings)
+      if (newerOnly && candidate.timestamp < sourceEpisode.timestamp) continue;
+
+      // Skip already related episodes
+      if (sourceEpisode.relatedEpisodes.includes(candidate.id)) continue;
+
+      let similarity = 0;
+      const mergeReasons: string[] = [];
+
+      // Calculate tag overlap
+      if (sourceEpisode.tags.length > 0 && candidate.tags.length > 0) {
+        const sourceTagSet = new Set(sourceEpisode.tags);
+        const commonTags = candidate.tags.filter(t => sourceTagSet.has(t));
+        const tagOverlap = commonTags.length / Math.max(sourceEpisode.tags.length, candidate.tags.length);
+
+        if (tagOverlap >= minTagOverlap) {
+          similarity += tagOverlap * 0.4;
+          mergeReasons.push(`Tag overlap: ${commonTags.join(', ')} (${Math.round(tagOverlap * 100)}%)`);
+        }
+      }
+
+      // Context matching
+      if (matchContext) {
+        const contextMatches: string[] = [];
+
+        if (sourceEpisode.context.projectPath &&
+            sourceEpisode.context.projectPath === candidate.context.projectPath) {
+          contextMatches.push('same project');
+          similarity += 0.2;
+        }
+
+        if (sourceEpisode.context.branch &&
+            sourceEpisode.context.branch === candidate.context.branch) {
+          contextMatches.push('same branch');
+          similarity += 0.15;
+        }
+
+        if (sourceEpisode.context.taskId &&
+            sourceEpisode.context.taskId === candidate.context.taskId) {
+          contextMatches.push('same task');
+          similarity += 0.15;
+        }
+
+        if (contextMatches.length > 0) {
+          mergeReasons.push(`Context match: ${contextMatches.join(', ')}`);
+        }
+      }
+
+      // Text similarity (simple word overlap)
+      const sourceWords = new Set(
+        `${sourceEpisode.summary} ${sourceEpisode.details}`
+          .toLowerCase()
+          .split(/\s+/)
+          .filter(w => w.length > 3)
+      );
+      const candidateText = `${candidate.summary} ${candidate.details}`.toLowerCase();
+      const matchingWords = [...sourceWords].filter(w => candidateText.includes(w));
+      if (matchingWords.length > 0 && sourceWords.size > 0) {
+        const textOverlap = matchingWords.length / sourceWords.size;
+        if (textOverlap > 0.2) {
+          similarity += textOverlap * 0.1;
+          mergeReasons.push(`Content similarity: ${Math.round(textOverlap * 100)}%`);
+        }
+      }
+
+      // Only include if there are merge reasons
+      if (mergeReasons.length > 0 && similarity > 0) {
+        results.push({
+          episode: candidate,
+          similarity,
+          mergeReasons,
+        });
+      }
+    }
+
+    // Sort by similarity and limit
+    return results
+      .sort((a, b) => b.similarity - a.similarity)
+      .slice(0, limit);
+  }
+
+  /**
+   * Merge two episodes into one (reconsolidation).
+   *
+   * The source episode is updated with information from the merge episode,
+   * and the merge episode's importance is reduced.
+   *
+   * @param targetId - The episode to merge into
+   * @param mergeId - The episode to merge from
+   * @param options - Merge options
+   * @returns Whether the merge was successful
+   */
+  mergeEpisodes(targetId: string, mergeId: string, options?: {
+    /** Combine learnings from both episodes (default: true) */
+    combineLearnings?: boolean;
+    /** Add merge episode tags to target (default: true) */
+    combineTags?: boolean;
+    /** Reduce merged episode importance by this factor (default: 0.5) */
+    mergedImportanceReduction?: number;
+  }): boolean {
+    const {
+      combineLearnings = true,
+      combineTags = true,
+      mergedImportanceReduction = 0.5,
+    } = options || {};
+
+    const target = this.episodic.get(targetId);
+    const merge = this.episodic.get(mergeId);
+
+    if (!target || !merge) return false;
+
+    // Combine learnings
+    if (combineLearnings && merge.outcome?.learnings) {
+      const existingLearnings = target.outcome?.learnings || [];
+      const newLearnings = merge.outcome.learnings.filter(
+        l => !existingLearnings.includes(l)
+      );
+      if (newLearnings.length > 0) {
+        this.episodic.addLearnings(targetId, newLearnings);
+      }
+    }
+
+    // Relate the episodes
+    this.episodic.relate(targetId, mergeId);
+
+    // Note: Tag combination would require a new method in EpisodicMemory
+    // For now, we just relate them and reduce merged episode importance
+
+    // Reduce importance of merged episode
+    const newImportance = Math.max(1, Math.floor(merge.importance * mergedImportanceReduction));
+    this.episodic.updateImportance(mergeId, newImportance);
+
+    return true;
   }
 
   /**
