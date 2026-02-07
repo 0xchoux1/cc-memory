@@ -928,6 +928,16 @@ export class SqliteStorage {
       params.push(JSON.stringify(updates.tags));
     }
 
+    if (updates.lastAccessed !== undefined) {
+      fields.push('last_accessed = ?');
+      params.push(updates.lastAccessed);
+    }
+
+    if (updates.accessCount !== undefined) {
+      fields.push('access_count = ?');
+      params.push(updates.accessCount);
+    }
+
     if (fields.length === 0) return false;
 
     params.push(id);

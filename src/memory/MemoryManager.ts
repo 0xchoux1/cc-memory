@@ -908,7 +908,8 @@ export class MemoryManager {
     let updated = 0;
 
     for (const episode of episodes) {
-      if (episode.timestamp < cutoffTime && episode.importance > minImportance) {
+      // Use lastAccessed to determine staleness (same as Ebbinghaus decay)
+      if (episode.lastAccessed < cutoffTime && episode.importance > minImportance) {
         const newImportance = Math.max(
           minImportance,
           Math.floor(episode.importance * decayFactor)

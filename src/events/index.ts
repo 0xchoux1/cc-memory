@@ -8,3 +8,7 @@ export {
   getGlobalEmitter,
   resetGlobalEmitter,
 } from './MemoryEventEmitter.js';
+export {
+  PersistentEventEmitter,
+  type PersistentEventEmitterConfig,
+} from './PersistentEventEmitter.js';
