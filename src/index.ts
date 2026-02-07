@@ -79,8 +79,10 @@ import {
   UnifiedMemoryForgetSchema,
 } from './server/tools.js';
 import { SqliteStorage } from './storage/SqliteStorage.js';
+import { shouldRegisterTool, getToolMode, getToolStats, type ToolMode } from './server/coreTools.js';
 
 // Configuration from environment
+const TOOL_MODE: ToolMode = getToolMode();
 const DATA_PATH = process.env.MEMORY_DATA_PATH || join(homedir(), '.claude-memory');
 const CLEANUP_INTERVAL = parseInt(process.env.MEMORY_CLEANUP_INTERVAL || '300000', 10); // 5 minutes
 const TACHIKOMA_NAME = process.env.CC_MEMORY_TACHIKOMA_NAME;
@@ -220,8 +222,15 @@ const server = new McpServer({
   instructions: SERVER_INSTRUCTIONS,
 });
 
+// Log tool mode info
+const toolStats = getToolStats(TOOL_MODE);
+console.error(`[cc-memory] Tool mode: ${TOOL_MODE} (${toolStats.registered}/${toolStats.totalAvailable} tools)`);
+
+// Helper for conditional tool registration
+const sr = (name: string) => shouldRegisterTool(name, TOOL_MODE);
+
 // Register tools
-server.tool(
+if (sr('working_set')) server.tool(
   'working_set',
   'Store a value in working memory with optional TTL',
   WorkingSetSchema.shape,
@@ -231,7 +240,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('working_get')) server.tool(
   'working_get',
   'Retrieve a value from working memory',
   WorkingGetSchema.shape,
@@ -241,7 +250,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('working_delete')) server.tool(
   'working_delete',
   'Remove a value from working memory',
   WorkingDeleteSchema.shape,
@@ -251,7 +260,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('working_list')) server.tool(
   'working_list',
   'List all working memory items',
   WorkingListSchema.shape,
@@ -261,7 +270,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('working_clear')) server.tool(
   'working_clear',
   'Clear expired or all working memory items',
   WorkingClearSchema.shape,
@@ -271,7 +280,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('episode_record')) server.tool(
   'episode_record',
   'Record a new episode in episodic memory',
   EpisodeRecordSchema.shape,
@@ -281,7 +290,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('episode_get')) server.tool(
   'episode_get',
   'Retrieve an episode by ID',
   EpisodeGetSchema.shape,
@@ -291,7 +300,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('episode_get_transcript')) server.tool(
   'episode_get_transcript',
   'Get the full conversation transcript for an episode',
   EpisodeGetTranscriptSchema.shape,
@@ -301,7 +310,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('episode_search')) server.tool(
   'episode_search',
   'Search episodes with full-text and filters',
   EpisodeSearchSchema.shape,
@@ -311,7 +320,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('episode_update')) server.tool(
   'episode_update',
   'Update episode outcome, learnings, or importance',
   EpisodeUpdateSchema.shape,
@@ -321,7 +330,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('episode_relate')) server.tool(
   'episode_relate',
   'Create a relation between two episodes',
   EpisodeRelateSchema.shape,
@@ -331,7 +340,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('semantic_create')) server.tool(
   'semantic_create',
   'Create a new semantic entity (fact, procedure, pattern, etc.)',
   SemanticCreateSchema.shape,
@@ -341,7 +350,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('semantic_get')) server.tool(
   'semantic_get',
   'Get a semantic entity by ID or name',
   SemanticGetSchema.shape,
@@ -351,7 +360,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('semantic_search')) server.tool(
   'semantic_search',
   'Search semantic entities with full-text and filters',
   SemanticSearchSchema.shape,
@@ -361,7 +370,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('semantic_add_observation')) server.tool(
   'semantic_add_observation',
   'Add an observation to a semantic entity',
   SemanticAddObservationSchema.shape,
@@ -371,7 +380,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('semantic_relate')) server.tool(
   'semantic_relate',
   'Create a relation between two semantic entities',
   SemanticRelateSchema.shape,
@@ -381,7 +390,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('semantic_update')) server.tool(
   'semantic_update',
   'Update a semantic entity',
   SemanticUpdateSchema.shape,
@@ -391,7 +400,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('memory_consolidate')) server.tool(
   'memory_consolidate',
   'Promote working memory to episodic or semantic memory',
   MemoryConsolidateSchema.shape,
@@ -401,7 +410,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('memory_recall')) server.tool(
   'memory_recall',
   'Intelligent recall across all memory layers',
   MemoryRecallSchema.shape,
@@ -411,7 +420,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('memory_stats')) server.tool(
   'memory_stats',
   'Get memory usage statistics',
   {},
@@ -421,7 +430,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('memory_import')) server.tool(
   'memory_import',
   'Import memory data from an export',
   MemoryImportSchema.shape,
@@ -431,7 +440,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('memory_export')) server.tool(
   'memory_export',
   'Export all memory data',
   MemoryExportSchema.shape,
@@ -441,7 +450,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('smart_recall')) server.tool(
   'smart_recall',
   'Intelligent recall with relevance scoring, spreading activation, and context-dependent encoding bonus',
   SmartRecallSchema.shape,
@@ -451,7 +460,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('reconsolidation_candidates')) server.tool(
   'reconsolidation_candidates',
   'Find episodes that could be merged with a given episode (reconsolidation)',
   ReconsolidationCandidatesSchema.shape,
@@ -461,7 +470,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('merge_episodes')) server.tool(
   'merge_episodes',
   'Merge two episodes into one (reconsolidation)',
   MergeEpisodesSchema.shape,
@@ -471,7 +480,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('cluster_episodes')) server.tool(
   'cluster_episodes',
   'Cluster similar episodes based on tags, type, and content',
   ClusterEpisodesSchema.shape,
@@ -481,7 +490,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('compress_memories')) server.tool(
   'compress_memories',
   'Compress episodic memory by clustering and summarizing similar episodes',
   CompressMemoriesSchema.shape,
@@ -492,7 +501,7 @@ server.tool(
 );
 
 // Goal Tracking Tools (P5)
-server.tool(
+if (sr('goal_create')) server.tool(
   'goal_create',
   'Create a new goal with success criteria',
   GoalCreateSchema.shape,
@@ -502,7 +511,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('goal_get')) server.tool(
   'goal_get',
   'Get a goal by ID',
   GoalGetSchema.shape,
@@ -512,7 +521,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('goal_list')) server.tool(
   'goal_list',
   'List all goals',
   GoalListSchema.shape,
@@ -522,7 +531,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('goal_check')) server.tool(
   'goal_check',
   'Check goal progress by searching for related episodes',
   GoalCheckSchema.shape,
@@ -532,7 +541,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('goal_update_status')) server.tool(
   'goal_update_status',
   'Update goal status (active, completed, abandoned)',
   GoalUpdateStatusSchema.shape,
@@ -542,7 +551,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('goal_add_note')) server.tool(
   'goal_add_note',
   'Add a note/observation to a goal',
   GoalAddNoteSchema.shape,
@@ -552,7 +561,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('memory_decay')) server.tool(
   'memory_decay',
   'Apply importance decay to old episodic memories',
   MemoryDecaySchema.shape,
@@ -562,7 +571,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('memory_boost')) server.tool(
   'memory_boost',
   'Boost importance of frequently accessed memories',
   MemoryBoostSchema.shape,
@@ -573,7 +582,7 @@ server.tool(
 );
 
 // Tachikoma Parallelization Tools
-server.tool(
+if (sr('tachikoma_init')) server.tool(
   'tachikoma_init',
   'Initialize Tachikoma parallelization (set individual ID and name)',
   TachikomaInitSchema.shape,
@@ -583,7 +592,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('tachikoma_status')) server.tool(
   'tachikoma_status',
   'Get Tachikoma sync status and optionally sync history',
   TachikomaStatusSchema.shape,
@@ -593,7 +602,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('tachikoma_export')) server.tool(
   'tachikoma_export',
   'Export memories as delta for parallelization with other Tachikoma instances',
   TachikomaExportSchema.shape,
@@ -603,7 +612,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('tachikoma_import')) server.tool(
   'tachikoma_import',
   'Import and merge memories from another Tachikoma instance',
   TachikomaImportSchema.shape,
@@ -613,7 +622,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('tachikoma_conflicts')) server.tool(
   'tachikoma_conflicts',
   'List pending conflicts from memory merges',
   TachikomaConflictsSchema.shape,
@@ -623,7 +632,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('tachikoma_resolve_conflict')) server.tool(
   'tachikoma_resolve_conflict',
   'Resolve a merge conflict manually',
   TachikomaResolveConflictSchema.shape,
@@ -634,7 +643,7 @@ server.tool(
 );
 
 // Agent Management Tools
-server.tool(
+if (sr('agent_register')) server.tool(
   'agent_register',
   'Register a new agent with role and specializations',
   AgentRegisterSchema.shape,
@@ -644,7 +653,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('agent_get')) server.tool(
   'agent_get',
   'Get agent profile by ID',
   AgentGetSchema.shape,
@@ -654,7 +663,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('agent_list')) server.tool(
   'agent_list',
   'List agents with optional role and activity filters',
   AgentListSchema.shape,
@@ -665,7 +674,7 @@ server.tool(
 );
 
 // Pattern Tools
-server.tool(
+if (sr('pattern_create')) server.tool(
   'pattern_create',
   'Create a new pattern from episodic observations',
   PatternCreateSchema.shape,
@@ -675,7 +684,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('pattern_get')) server.tool(
   'pattern_get',
   'Get a pattern by ID',
   PatternGetSchema.shape,
@@ -685,7 +694,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('pattern_list')) server.tool(
   'pattern_list',
   'List patterns with optional filters',
   PatternListSchema.shape,
@@ -695,7 +704,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('pattern_confirm')) server.tool(
   'pattern_confirm',
   'Confirm or reject a pattern',
   PatternConfirmSchema.shape,
@@ -706,7 +715,7 @@ server.tool(
 );
 
 // Insight Tools
-server.tool(
+if (sr('insight_create')) server.tool(
   'insight_create',
   'Create an insight from patterns',
   InsightCreateSchema.shape,
@@ -716,7 +725,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('insight_get')) server.tool(
   'insight_get',
   'Get an insight by ID',
   InsightGetSchema.shape,
@@ -726,7 +735,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('insight_list')) server.tool(
   'insight_list',
   'List insights with optional filters',
   InsightListSchema.shape,
@@ -736,7 +745,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('insight_validate')) server.tool(
   'insight_validate',
   'Validate or reject an insight',
   InsightValidateSchema.shape,
@@ -747,7 +756,7 @@ server.tool(
 );
 
 // Wisdom Tools
-server.tool(
+if (sr('wisdom_create')) server.tool(
   'wisdom_create',
   'Create wisdom from insights and patterns (DIKW Level 4)',
   WisdomCreateSchema.shape,
@@ -757,7 +766,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('wisdom_get')) server.tool(
   'wisdom_get',
   'Get wisdom by ID or name',
   WisdomGetSchema.shape,
@@ -767,7 +776,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('wisdom_search')) server.tool(
   'wisdom_search',
   'Search wisdom by query and domains',
   WisdomSearchSchema.shape,
@@ -777,7 +786,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('wisdom_apply')) server.tool(
   'wisdom_apply',
   'Record wisdom application result',
   WisdomApplySchema.shape,
@@ -788,7 +797,7 @@ server.tool(
 );
 
 // DIKW Pipeline Tools
-server.tool(
+if (sr('dikw_analyze')) server.tool(
   'dikw_analyze',
   'Analyze episodes to detect pattern, insight, and wisdom candidates automatically',
   DIKWAnalyzeSchema.shape,
@@ -798,7 +807,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('dikw_auto_promote')) server.tool(
   'dikw_auto_promote',
   'Automatically create patterns, insights, and wisdom from detected candidates',
   DIKWAutoPromoteSchema.shape,
@@ -809,7 +818,7 @@ server.tool(
 );
 
 // Unified High-Level Tools (simplified interface)
-server.tool(
+if (sr('memory_store')) server.tool(
   'memory_store',
   'Store a memory (auto-selects working/episodic/semantic based on content)',
   UnifiedMemoryStoreSchema.shape,
@@ -819,7 +828,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('memory_update')) server.tool(
   'memory_update',
   'Update any memory type by ID',
   UnifiedMemoryUpdateSchema.shape,
@@ -829,7 +838,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (sr('memory_forget')) server.tool(
   'memory_forget',
   'Forget/delete a memory or apply decay',
   UnifiedMemoryForgetSchema.shape,
