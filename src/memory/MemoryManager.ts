@@ -4,7 +4,7 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import { SqliteStorage } from '../storage/SqliteStorage.js';
-import { WorkingMemory } from './WorkingMemory.js';
+import { WorkingMemory, type WorkingMemoryConfig } from './WorkingMemory.js';
 import { EpisodicMemory } from './EpisodicMemory.js';
 import { SemanticMemory } from './SemanticMemory.js';
 import type {
@@ -45,7 +45,19 @@ export class MemoryManager {
     this.sessionId = config.sessionId || uuidv4();
     this.storage = new SqliteStorage(config);
 
-    this.working = new WorkingMemory(this.storage, this.sessionId);
+    this.working = new WorkingMemory(this.storage, this.sessionId, {
+      capacity: 7,
+      onEvict: (item) => {
+        // Auto-consolidate evicted items to episodic memory
+        this.episodic.record({
+          type: 'interaction',
+          summary: `Working memory evicted: ${item.key}`,
+          details: JSON.stringify(item.value, null, 2),
+          importance: item.metadata.priority === 'high' ? 6 : item.metadata.priority === 'medium' ? 4 : 2,
+          tags: [...item.tags, 'auto-consolidated', 'capacity-eviction'],
+        });
+      },
+    });
     this.episodic = new EpisodicMemory(this.storage, this.sessionId);
     this.semantic = new SemanticMemory(this.storage);
 
@@ -103,8 +115,8 @@ export class MemoryManager {
       tags: [...(metadata.tags || []), ...workingItem.tags],
     });
 
-    // Optionally delete the working memory item
-    // this.working.delete(workingKey);
+    // Delete the working memory item after consolidation
+    this.working.delete(workingKey);
 
     return episode;
   }
@@ -131,6 +143,9 @@ export class MemoryManager {
       content: workingItem.value,
       tags: [...(metadata.tags || []), ...workingItem.tags],
     });
+
+    // Delete the working memory item after consolidation
+    this.working.delete(workingKey);
 
     return entity;
   }

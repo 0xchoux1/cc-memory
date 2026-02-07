@@ -1,5 +1,6 @@
 /**
  * Working Memory - Short-term, TTL-based memory for current task context
+ * Implements capacity limit inspired by Cowan's 4±1 model
  */
 
 import { v4 as uuidv4 } from 'uuid';
@@ -12,14 +13,25 @@ import type {
   WORKING_MEMORY_TTL,
 } from './types.js';
 
+export interface WorkingMemoryConfig {
+  /** Maximum number of items in working memory (default: 7, Cowan's 4±1) */
+  capacity?: number;
+  /** Callback when items are evicted due to capacity overflow */
+  onEvict?: (item: WorkingMemoryItem) => void;
+}
+
 export class WorkingMemory {
   private storage: SqliteStorage;
   private sessionId: string;
   private defaultTTLs: Record<WorkingMemoryType, number>;
+  private capacity: number;
+  private onEvict?: (item: WorkingMemoryItem) => void;
 
-  constructor(storage: SqliteStorage, sessionId: string) {
+  constructor(storage: SqliteStorage, sessionId: string, config?: WorkingMemoryConfig) {
     this.storage = storage;
     this.sessionId = sessionId;
+    this.capacity = config?.capacity ?? 7;
+    this.onEvict = config?.onEvict;
     this.defaultTTLs = {
       task_state: 24 * 60 * 60 * 1000,    // 24 hours
       decision: 4 * 60 * 60 * 1000,       // 4 hours
@@ -30,6 +42,7 @@ export class WorkingMemory {
 
   /**
    * Store a value in working memory
+   * If capacity is exceeded, lowest-priority oldest items are evicted
    */
   set(input: WorkingMemoryInput): WorkingMemoryItem {
     const now = Date.now();
@@ -55,7 +68,54 @@ export class WorkingMemory {
     };
 
     this.storage.setWorkingItem(item);
+
+    // Enforce capacity limit (only if this was a new item, not an update)
+    if (!existing) {
+      this.enforceCapacity();
+    }
+
     return item;
+  }
+
+  /**
+   * Enforce capacity limit by evicting lowest-priority, oldest items
+   */
+  private enforceCapacity(): void {
+    const items = this.storage.listWorkingItems({ includeExpired: false });
+
+    if (items.length <= this.capacity) return;
+
+    // Sort by priority (low first) then by updatedAt (oldest first)
+    const priorityOrder: Record<string, number> = { low: 0, medium: 1, high: 2 };
+    const sorted = [...items].sort((a, b) => {
+      const pDiff = priorityOrder[a.metadata.priority] - priorityOrder[b.metadata.priority];
+      if (pDiff !== 0) return pDiff;
+      return a.metadata.updatedAt - b.metadata.updatedAt;
+    });
+
+    // Evict excess items
+    const toEvict = sorted.slice(0, items.length - this.capacity);
+    for (const item of toEvict) {
+      if (this.onEvict) {
+        this.onEvict(item);
+      }
+      this.storage.deleteWorkingItem(item.key);
+    }
+  }
+
+  /**
+   * Get the current capacity limit
+   */
+  getCapacity(): number {
+    return this.capacity;
+  }
+
+  /**
+   * Set a new capacity limit
+   */
+  setCapacity(capacity: number): void {
+    this.capacity = capacity;
+    this.enforceCapacity();
   }
 
   /**

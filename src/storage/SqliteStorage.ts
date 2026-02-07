@@ -43,6 +43,8 @@ import type {
   WisdomApplication,
   Transcript,
 } from '../memory/types.js';
+import { safeJsonParse, safeJsonParseOptional } from '../utils/safeJson.js';
+import { SearchManager } from '../search/SearchManager.js';
 
 export class SqliteStorage {
   private db: SqlJsDatabase | null = null;
@@ -50,10 +52,15 @@ export class SqliteStorage {
   private dbPath: string;
   private initialized: boolean = false;
   private initPromise: Promise<void> | null = null;
+  private dirty: boolean = false;
+  private saveTimer: ReturnType<typeof setTimeout> | null = null;
+  private static readonly SAVE_DEBOUNCE_MS = 1000;
+  private searchManager: SearchManager;
 
   constructor(config: StorageConfig) {
     this.config = config;
     this.dbPath = join(config.dataPath, 'memory.db');
+    this.searchManager = new SearchManager(null);
 
     // Ensure data directory exists
     const dbDir = dirname(this.dbPath);
@@ -82,6 +89,12 @@ export class SqliteStorage {
     }
 
     this.createTables();
+
+    // Initialize search index
+    this.searchManager.setDatabase(this.db);
+    this.searchManager.setSaveCallback(() => this.markDirty());
+    this.searchManager.initialize();
+
     this.initialized = true;
   }
 
@@ -471,15 +484,42 @@ export class SqliteStorage {
     }
   }
 
-  private save(): void {
-    if (!this.db) return;
+  /**
+   * Mark the database as dirty and schedule a debounced write.
+   * Replaces direct save() calls to batch multiple mutations into a single I/O.
+   */
+  private markDirty(): void {
+    this.dirty = true;
+    if (this.saveTimer) return; // already scheduled
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = null;
+      this.flush();
+    }, SqliteStorage.SAVE_DEBOUNCE_MS);
+  }
+
+  /**
+   * Immediately persist the database to disk if dirty.
+   * Called on close/shutdown and when an immediate write is required.
+   */
+  flush(): void {
+    if (!this.db || !this.dirty) return;
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer);
+      this.saveTimer = null;
+    }
     try {
       const data = this.db.export();
       const buffer = Buffer.from(data);
       writeFileSync(this.dbPath, buffer);
+      this.dirty = false;
     } catch (error) {
       console.error('Failed to save database:', error);
     }
+  }
+
+  /** @deprecated Use markDirty() for batched writes or flush() for immediate. */
+  private save(): void {
+    this.markDirty();
   }
 
   // ============================================================================
@@ -506,6 +546,7 @@ export class SqliteStorage {
       item.metadata.expiresAt,
     ]);
 
+    this.searchManager.indexWorkingItem(item);
     this.save();
   }
 
@@ -524,8 +565,13 @@ export class SqliteStorage {
   deleteWorkingItem(key: string): boolean {
     if (!this.db) return false;
 
+    // Get item ID before deletion for index removal
+    const item = this.getWorkingItem(key);
     this.db.run('DELETE FROM working_memory WHERE key = ?', [key]);
     const changes = this.db.getRowsModified();
+    if (changes > 0 && item) {
+      this.searchManager.removeDocument('working', item.id);
+    }
     this.save();
     return changes > 0;
   }
@@ -552,9 +598,9 @@ export class SqliteStorage {
     }
 
     if (filter?.tags && filter.tags.length > 0) {
-      const tagConditions = filter.tags.map(() => 'tags LIKE ?').join(' OR ');
+      const tagConditions = filter.tags.map(() => `EXISTS (SELECT 1 FROM json_each(tags) WHERE json_each.value = ?)`).join(' OR ');
       sql += ` AND (${tagConditions})`;
-      params.push(...filter.tags.map(tag => `%"${tag}"%`));
+      params.push(...filter.tags);
     }
 
     sql += ' ORDER BY updated_at DESC';
@@ -589,7 +635,7 @@ export class SqliteStorage {
       id: row.id as string,
       key: row.key as string,
       type: row.type as WorkingMemoryItem['type'],
-      value: JSON.parse(row.value as string),
+      value: safeJsonParse(row.value as string, {}),
       metadata: {
         createdAt: row.created_at as number,
         updatedAt: row.updated_at as number,
@@ -597,7 +643,7 @@ export class SqliteStorage {
         sessionId: row.session_id as string,
         priority: row.priority as WorkingMemoryItem['metadata']['priority'],
       },
-      tags: JSON.parse(row.tags as string || '[]'),
+      tags: safeJsonParse(row.tags as string, []),
     };
   }
 
@@ -630,6 +676,7 @@ export class SqliteStorage {
       Date.now(),
     ]);
 
+    this.searchManager.indexEpisode(episode);
     this.save();
     return episode.id;
   }
@@ -701,13 +748,22 @@ export class SqliteStorage {
 
     if (query.query) {
       if (query.searchTranscript) {
-        // Search in summary, details, AND transcript content
+        // Transcript search still uses LIKE since transcripts are not indexed
         sql += ' AND (em.summary LIKE ? OR em.details LIKE ? OR et.transcript LIKE ?)';
         params.push(`%${query.query}%`, `%${query.query}%`, `%${query.query}%`);
       } else {
-        // Simple text search (LIKE-based since FTS5 is not available in sql.js by default)
-        sql += ' AND (em.summary LIKE ? OR em.details LIKE ?)';
-        params.push(`%${query.query}%`, `%${query.query}%`);
+        // Use inverted index for fast text search
+        const searchResults = this.searchManager.search(query.query, { types: ['episodic'], limit: 1000 });
+        if (searchResults.length > 0) {
+          const ids = searchResults.map(r => r.docId);
+          const placeholders = ids.map(() => '?').join(', ');
+          sql += ` AND em.id IN (${placeholders})`;
+          params.push(...ids);
+        } else {
+          // No index results - fall back to LIKE for newly created data not yet indexed
+          sql += ' AND (em.summary LIKE ? OR em.details LIKE ?)';
+          params.push(`%${query.query}%`, `%${query.query}%`);
+        }
       }
     }
 
@@ -732,9 +788,9 @@ export class SqliteStorage {
     }
 
     if (query.tags && query.tags.length > 0) {
-      const tagConditions = query.tags.map(() => 'em.tags LIKE ?').join(' OR ');
+      const tagConditions = query.tags.map(() => `EXISTS (SELECT 1 FROM json_each(em.tags) WHERE json_each.value = ?)`).join(' OR ');
       sql += ` AND (${tagConditions})`;
-      params.push(...query.tags.map(tag => `%"${tag}"%`));
+      params.push(...query.tags);
     }
 
     sql += ' ORDER BY em.timestamp DESC';
@@ -791,8 +847,23 @@ export class SqliteStorage {
     params.push(id);
     this.db.run(`UPDATE episodic_memory SET ${fields.join(', ')} WHERE id = ?`, params as (string | number)[]);
     const changes = this.db.getRowsModified();
+
+    // Re-index the updated episode
+    if (changes > 0) {
+      const updated = this.getEpisodeWithoutTracking(id);
+      if (updated) this.searchManager.indexEpisode(updated);
+    }
+
     this.save();
     return changes > 0;
+  }
+
+  /** Get episode without incrementing access count (for internal indexing use) */
+  private getEpisodeWithoutTracking(id: string): EpisodicMemory | null {
+    if (!this.db) return null;
+    const result = this.db.exec('SELECT * FROM episodic_memory WHERE id = ?', [id]);
+    if (result.length === 0 || result[0].values.length === 0) return null;
+    return this.rowToEpisode(result[0].columns, result[0].values[0]);
   }
 
   getRecentEpisodes(limit: number): EpisodicMemory[] {
@@ -814,14 +885,14 @@ export class SqliteStorage {
       type: row.type as EpisodicMemory['type'],
       summary: row.summary as string,
       details: row.details as string,
-      context: JSON.parse(row.context as string || '{}'),
-      outcome: row.outcome ? JSON.parse(row.outcome as string) : undefined,
-      relatedEpisodes: JSON.parse(row.related_episodes as string || '[]'),
-      relatedEntities: JSON.parse(row.related_entities as string || '[]'),
+      context: safeJsonParse(row.context as string, {} as EpisodicMemory['context']),
+      outcome: safeJsonParseOptional(row.outcome as string),
+      relatedEpisodes: safeJsonParse(row.related_episodes as string, []),
+      relatedEntities: safeJsonParse(row.related_entities as string, []),
       importance: row.importance as number,
       accessCount: row.access_count as number,
       lastAccessed: row.last_accessed as number,
-      tags: JSON.parse(row.tags as string || '[]'),
+      tags: safeJsonParse(row.tags as string, []),
     };
   }
 
@@ -853,6 +924,7 @@ export class SqliteStorage {
       entity.updatedAt,
     ]);
 
+    this.searchManager.indexEntity(entity);
     this.save();
     return entity.id;
   }
@@ -916,8 +988,18 @@ export class SqliteStorage {
     const params: (string | number)[] = [];
 
     if (query.query) {
-      sql += ' AND (name LIKE ? OR description LIKE ? OR observations LIKE ?)';
-      params.push(`%${query.query}%`, `%${query.query}%`, `%${query.query}%`);
+      // Use inverted index for fast text search
+      const searchResults = this.searchManager.search(query.query, { types: ['semantic'], limit: 1000 });
+      if (searchResults.length > 0) {
+        const ids = searchResults.map(r => r.docId);
+        const placeholders = ids.map(() => '?').join(', ');
+        sql += ` AND id IN (${placeholders})`;
+        params.push(...ids);
+      } else {
+        // No index results - fall back to LIKE for newly created data not yet indexed
+        sql += ' AND (name LIKE ? OR description LIKE ? OR observations LIKE ?)';
+        params.push(`%${query.query}%`, `%${query.query}%`, `%${query.query}%`);
+      }
     }
 
     if (query.type) {
@@ -931,9 +1013,9 @@ export class SqliteStorage {
     }
 
     if (query.tags && query.tags.length > 0) {
-      const tagConditions = query.tags.map(() => 'tags LIKE ?').join(' OR ');
+      const tagConditions = query.tags.map(() => `EXISTS (SELECT 1 FROM json_each(tags) WHERE json_each.value = ?)`).join(' OR ');
       sql += ` AND (${tagConditions})`;
-      params.push(...query.tags.map(tag => `%"${tag}"%`));
+      params.push(...query.tags);
     }
 
     sql += ' ORDER BY updated_at DESC';
@@ -996,6 +1078,13 @@ export class SqliteStorage {
     params.push(id);
     this.db.run(`UPDATE semantic_entities SET ${fields.join(', ')} WHERE id = ?`, params as (string | number)[]);
     const changes = this.db.getRowsModified();
+
+    // Re-index the updated entity
+    if (changes > 0) {
+      const updated = this.getEntity(id);
+      if (updated) this.searchManager.indexEntity(updated);
+    }
+
     this.save();
     return changes > 0;
   }
@@ -1039,15 +1128,15 @@ export class SqliteStorage {
       name: row.name as string,
       type: row.type as SemanticEntity['type'],
       description: row.description as string,
-      content: row.content ? JSON.parse(row.content as string) : undefined,
-      procedure: row.procedure ? JSON.parse(row.procedure as string) : undefined,
-      observations: JSON.parse(row.observations as string || '[]'),
+      content: safeJsonParseOptional(row.content as string),
+      procedure: safeJsonParseOptional(row.procedure as string),
+      observations: safeJsonParse(row.observations as string, []),
       confidence: row.confidence as number,
       source: row.source as SemanticEntity['source'],
       createdAt: row.created_at as number,
       updatedAt: row.updated_at as number,
       version: row.version as number,
-      tags: JSON.parse(row.tags as string || '[]'),
+      tags: safeJsonParse(row.tags as string, []),
     };
   }
 
@@ -1059,7 +1148,7 @@ export class SqliteStorage {
       to: row.to_entity as string,
       relationType: row.relation_type as string,
       strength: row.strength as number,
-      metadata: row.metadata ? JSON.parse(row.metadata as string) : undefined,
+      metadata: safeJsonParseOptional(row.metadata as string),
       createdAt: row.created_at as number,
     };
   }
@@ -1197,9 +1286,62 @@ export class SqliteStorage {
     };
   }
 
+  /**
+   * Get the search manager for direct search operations
+   */
+  getSearchManager(): SearchManager {
+    return this.searchManager;
+  }
+
+  /**
+   * Rebuild the search index from all existing data.
+   * Useful after importing data or for initial migration.
+   */
+  rebuildSearchIndex(): void {
+    if (!this.db) return;
+
+    this.searchManager.clear();
+
+    // Re-index all episodic memories
+    const episodes = this.searchEpisodes({ limit: 10000 });
+    for (const ep of episodes) {
+      this.searchManager.indexEpisode(ep);
+    }
+
+    // Re-index all semantic entities
+    const entities = this.searchEntities({ limit: 10000 });
+    for (const ent of entities) {
+      this.searchManager.indexEntity(ent);
+    }
+
+    // Re-index all working items
+    const workingItems = this.listWorkingItems({ includeExpired: true });
+    for (const item of workingItems) {
+      this.searchManager.indexWorkingItem(item);
+    }
+
+    // Re-index all patterns
+    const patterns = this.listPatterns({ limit: 10000 });
+    for (const p of patterns) {
+      this.searchManager.indexPattern(p);
+    }
+
+    // Re-index all insights
+    const insights = this.listInsights({ limit: 10000 });
+    for (const i of insights) {
+      this.searchManager.indexInsight(i);
+    }
+
+    // Re-index all wisdom
+    const wisdomList = this.listWisdom({ limit: 10000 });
+    for (const w of wisdomList) {
+      this.searchManager.indexWisdom(w);
+    }
+  }
+
   close(): void {
     if (this.db) {
-      this.save();
+      this.flush();
       this.db.close();
       this.db = null;
     }
@@ -1349,7 +1491,7 @@ export class SqliteStorage {
 
     if (result.length === 0 || result[0].values.length === 0) return null;
 
-    return JSON.parse(result[0].values[0][0] as string);
+    return safeJsonParse(result[0].values[0][0] as string, [] as Transcript);
   }
 
   /**
@@ -1395,7 +1537,7 @@ export class SqliteStorage {
     const transcripts: Record<string, Transcript> = {};
     for (const row of result[0].values) {
       const episodeId = row[0] as string;
-      const transcript = JSON.parse(row[1] as string);
+      const transcript = safeJsonParse(row[1] as string, []);
       transcripts[episodeId] = transcript;
     }
     return transcripts;
@@ -1521,9 +1663,9 @@ export class SqliteStorage {
       id: row.id as string,
       name: row.name as string,
       role: row.role as AgentRole,
-      specializations: JSON.parse(row.specializations as string || '[]'),
-      capabilities: JSON.parse(row.capabilities as string || '[]'),
-      knowledgeDomains: JSON.parse(row.knowledge_domains as string || '[]'),
+      specializations: safeJsonParse(row.specializations as string, []),
+      capabilities: safeJsonParse(row.capabilities as string, []),
+      knowledgeDomains: safeJsonParse(row.knowledge_domains as string, []),
       createdAt: row.created_at as number,
       lastActiveAt: row.last_active_at as number,
     };
@@ -1590,7 +1732,7 @@ export class SqliteStorage {
       id: row.tachikoma_id as TachikomaId,
       name: row.tachikoma_name as string | undefined,
       syncSeq: row.sync_seq as number,
-      syncVector: JSON.parse(row.sync_vector as string),
+      syncVector: safeJsonParse(row.sync_vector as string, {}),
       lastSyncAt: row.last_sync_at as number | undefined,
       createdAt: row.created_at as number,
     };
@@ -1621,7 +1763,7 @@ export class SqliteStorage {
           id: row.tachikoma_id as TachikomaId,
           name: row.tachikoma_name as string | undefined,
           syncSeq: row.sync_seq as number,
-          syncVector: JSON.parse(row.sync_vector as string),
+          syncVector: safeJsonParse(row.sync_vector as string, {}),
           lastSyncAt: row.last_sync_at as number | undefined,
           createdAt: row.created_at as number,
         };
@@ -1637,7 +1779,7 @@ export class SqliteStorage {
       id: row.tachikoma_id as TachikomaId,
       name: row.tachikoma_name as string | undefined,
       syncSeq: row.sync_seq as number,
-      syncVector: JSON.parse(row.sync_vector as string),
+      syncVector: safeJsonParse(row.sync_vector as string, {}),
       lastSyncAt: row.last_sync_at as number | undefined,
       createdAt: row.created_at as number,
     };
@@ -1731,7 +1873,7 @@ export class SqliteStorage {
         syncType: r.sync_type as SyncType,
         itemsCount: r.items_count as number,
         conflictsCount: r.conflicts_count as number,
-        syncVector: JSON.parse(r.sync_vector as string),
+        syncVector: safeJsonParse(r.sync_vector as string, {}),
         createdAt: r.created_at as number,
       };
     });
@@ -1781,8 +1923,8 @@ export class SqliteStorage {
       return {
         id: r.id as string,
         memoryType: r.memory_type as ConflictRecord['memoryType'],
-        localItem: JSON.parse(r.local_item as string),
-        remoteItem: JSON.parse(r.remote_item as string),
+        localItem: safeJsonParse(r.local_item as string, {}),
+        remoteItem: safeJsonParse(r.remote_item as string, {}),
         strategy: r.strategy as ConflictRecord['strategy'],
         createdAt: r.created_at as number,
         resolvedAt: r.resolved_at as number | undefined,
@@ -1839,6 +1981,7 @@ export class SqliteStorage {
       pattern.updatedAt,
     ]);
 
+    this.searchManager.indexPattern(pattern);
     this.save();
     return pattern;
   }
@@ -1871,8 +2014,16 @@ export class SqliteStorage {
       params.push(query.minFrequency);
     }
     if (query?.query) {
-      sql += ' AND pattern LIKE ?';
-      params.push(`%${query.query}%`);
+      const searchResults = this.searchManager.search(query.query, { types: ['pattern'], limit: 1000 });
+      if (searchResults.length > 0) {
+        const ids = searchResults.map(r => r.docId);
+        const placeholders = ids.map(() => '?').join(', ');
+        sql += ` AND id IN (${placeholders})`;
+        params.push(...ids);
+      } else {
+        sql += ' AND pattern LIKE ?';
+        params.push(`%${query.query}%`);
+      }
     }
 
     sql += ' ORDER BY confidence DESC, frequency DESC';
@@ -1919,9 +2070,9 @@ export class SqliteStorage {
       pattern: row.pattern as string,
       frequency: row.frequency as number,
       confidence: row.confidence as number,
-      supportingEpisodes: JSON.parse(row.supporting_episodes as string || '[]'),
-      relatedTags: JSON.parse(row.related_tags as string || '[]'),
-      agentRoles: JSON.parse(row.agent_roles as string || '[]'),
+      supportingEpisodes: safeJsonParse(row.supporting_episodes as string, []),
+      relatedTags: safeJsonParse(row.related_tags as string, []),
+      agentRoles: safeJsonParse(row.agent_roles as string, []),
       sourceAgentId: row.source_agent_id as string | undefined,
       status: row.status as PatternStatus,
       createdAt: row.created_at as number,
@@ -1976,6 +2127,7 @@ export class SqliteStorage {
       insight.updatedAt,
     ]);
 
+    this.searchManager.indexInsight(insight);
     this.save();
     return insight;
   }
@@ -2004,8 +2156,16 @@ export class SqliteStorage {
       params.push(query.minConfidence);
     }
     if (query?.query) {
-      sql += ' AND (insight LIKE ? OR reasoning LIKE ?)';
-      params.push(`%${query.query}%`, `%${query.query}%`);
+      const searchResults = this.searchManager.search(query.query, { types: ['insight'], limit: 1000 });
+      if (searchResults.length > 0) {
+        const ids = searchResults.map(r => r.docId);
+        const placeholders = ids.map(() => '?').join(', ');
+        sql += ` AND id IN (${placeholders})`;
+        params.push(...ids);
+      } else {
+        sql += ' AND (insight LIKE ? OR reasoning LIKE ?)';
+        params.push(`%${query.query}%`, `%${query.query}%`);
+      }
     }
 
     sql += ' ORDER BY confidence DESC, created_at DESC';
@@ -2044,13 +2204,13 @@ export class SqliteStorage {
       id: row.id as string,
       insight: row.insight as string,
       reasoning: row.reasoning as string || '',
-      sourcePatterns: JSON.parse(row.source_patterns as string || '[]'),
+      sourcePatterns: safeJsonParse(row.source_patterns as string, []),
       confidence: row.confidence as number,
       novelty: row.novelty as number,
       utility: row.utility as number,
-      domains: JSON.parse(row.domains as string || '[]'),
+      domains: safeJsonParse(row.domains as string, []),
       sourceAgentId: row.source_agent_id as string | undefined,
-      validatedBy: JSON.parse(row.validated_by as string || '[]'),
+      validatedBy: safeJsonParse(row.validated_by as string, []),
       status: row.status as InsightStatus,
       knowledgeLevel: row.knowledge_level as Insight['knowledgeLevel'],
       createdAt: row.created_at as number,
@@ -2121,6 +2281,7 @@ export class SqliteStorage {
       wisdom.updatedAt,
     ]);
 
+    this.searchManager.indexWisdom(wisdom);
     this.save();
     return wisdom;
   }
@@ -2145,8 +2306,16 @@ export class SqliteStorage {
       params.push(query.minConfidence);
     }
     if (query?.query) {
-      sql += ' AND (name LIKE ? OR principle LIKE ? OR description LIKE ?)';
-      params.push(`%${query.query}%`, `%${query.query}%`, `%${query.query}%`);
+      const searchResults = this.searchManager.search(query.query, { types: ['wisdom'], limit: 1000 });
+      if (searchResults.length > 0) {
+        const ids = searchResults.map(r => r.docId);
+        const placeholders = ids.map(() => '?').join(', ');
+        sql += ` AND id IN (${placeholders})`;
+        params.push(...ids);
+      } else {
+        sql += ' AND (name LIKE ? OR principle LIKE ? OR description LIKE ?)';
+        params.push(`%${query.query}%`, `%${query.query}%`, `%${query.query}%`);
+      }
     }
 
     sql += ' ORDER BY confidence_score DESC, created_at DESC';
@@ -2235,22 +2404,22 @@ export class SqliteStorage {
       name: row.name as string,
       principle: row.principle as string,
       description: row.description as string,
-      derivedFromInsights: JSON.parse(row.derived_from_insights as string || '[]'),
-      derivedFromPatterns: JSON.parse(row.derived_from_patterns as string || '[]'),
-      evidenceEpisodes: JSON.parse(row.evidence_episodes as string || '[]'),
-      applicableDomains: JSON.parse(row.applicable_domains as string || '[]'),
-      applicableContexts: JSON.parse(row.applicable_contexts as string || '[]'),
-      limitations: JSON.parse(row.limitations as string || '[]'),
+      derivedFromInsights: safeJsonParse(row.derived_from_insights as string, []),
+      derivedFromPatterns: safeJsonParse(row.derived_from_patterns as string, []),
+      evidenceEpisodes: safeJsonParse(row.evidence_episodes as string, []),
+      applicableDomains: safeJsonParse(row.applicable_domains as string, []),
+      applicableContexts: safeJsonParse(row.applicable_contexts as string, []),
+      limitations: safeJsonParse(row.limitations as string, []),
       validationCount: row.validation_count as number,
       successfulApplications: row.successful_applications as number,
       failedApplications: row.failed_applications as number,
       confidenceScore: row.confidence_score as number,
       createdBy: row.created_by as string | undefined,
-      contributingAgents: JSON.parse(row.contributing_agents as string || '[]'),
+      contributingAgents: safeJsonParse(row.contributing_agents as string, []),
       version: row.version as number,
-      tags: JSON.parse(row.tags as string || '[]'),
-      relatedWisdom: JSON.parse(row.related_wisdom as string || '[]'),
-      contradictoryWisdom: JSON.parse(row.contradictory_wisdom as string || '[]'),
+      tags: safeJsonParse(row.tags as string, []),
+      relatedWisdom: safeJsonParse(row.related_wisdom as string, []),
+      contradictoryWisdom: safeJsonParse(row.contradictory_wisdom as string, []),
       createdAt: row.created_at as number,
       updatedAt: row.updated_at as number,
     };
@@ -2284,7 +2453,7 @@ export class SqliteStorage {
             id: r.id as string,
             type: r.type as WorkingMemoryItem['type'],
             key: r.key as string,
-            value: JSON.parse(r.value as string),
+            value: safeJsonParse(r.value as string, {}),
             metadata: {
               createdAt: r.created_at as number,
               updatedAt: r.updated_at as number,
@@ -2292,7 +2461,7 @@ export class SqliteStorage {
               sessionId: r.session_id as string,
               priority: r.priority as WorkingMemoryItem['metadata']['priority'],
             },
-            tags: JSON.parse(r.tags as string || '[]'),
+            tags: safeJsonParse(r.tags as string, []),
           };
         })
       : [];
@@ -2319,15 +2488,15 @@ export class SqliteStorage {
             name: r.name as string,
             type: r.type as SemanticEntity['type'],
             description: r.description as string,
-            content: r.content ? JSON.parse(r.content as string) : null,
-            procedure: r.procedure ? JSON.parse(r.procedure as string) : undefined,
-            observations: JSON.parse(r.observations as string || '[]'),
+            content: safeJsonParseOptional(r.content as string) ?? null,
+            procedure: safeJsonParseOptional(r.procedure as string),
+            observations: safeJsonParse(r.observations as string, []),
             confidence: r.confidence as number,
             source: r.source as SemanticEntity['source'],
             createdAt: r.created_at as number,
             updatedAt: r.updated_at as number,
             version: r.version as number,
-            tags: JSON.parse(r.tags as string || '[]'),
+            tags: safeJsonParse(r.tags as string, []),
           };
         })
       : [];
@@ -2346,7 +2515,7 @@ export class SqliteStorage {
             to: r.to_entity as string,
             relationType: r.relation_type as string,
             strength: r.strength as number,
-            metadata: r.metadata ? JSON.parse(r.metadata as string) : undefined,
+            metadata: safeJsonParseOptional(r.metadata as string),
             createdAt: r.created_at as number,
           };
         })
@@ -2562,7 +2731,7 @@ export class SqliteStorage {
       id: r.id as string,
       type: r.type as WorkingMemoryItem['type'],
       key: r.key as string,
-      value: JSON.parse(r.value as string),
+      value: safeJsonParse(r.value as string, {}),
       metadata: {
         createdAt: r.created_at as number,
         updatedAt: r.updated_at as number,
@@ -2570,7 +2739,7 @@ export class SqliteStorage {
         sessionId: r.session_id as string,
         priority: r.priority as WorkingMemoryItem['metadata']['priority'],
       },
-      tags: JSON.parse(r.tags as string || '[]'),
+      tags: safeJsonParse(r.tags as string, []),
     };
   }
 
@@ -2650,15 +2819,15 @@ export class SqliteStorage {
       name: r.name as string,
       type: r.type as SemanticEntity['type'],
       description: r.description as string,
-      content: r.content ? JSON.parse(r.content as string) : null,
-      procedure: r.procedure ? JSON.parse(r.procedure as string) : undefined,
-      observations: JSON.parse(r.observations as string || '[]'),
+      content: safeJsonParseOptional(r.content as string) ?? null,
+      procedure: safeJsonParseOptional(r.procedure as string),
+      observations: safeJsonParse(r.observations as string, []),
       confidence: r.confidence as number,
       source: r.source as SemanticEntity['source'],
       createdAt: r.created_at as number,
       updatedAt: r.updated_at as number,
       version: r.version as number,
-      tags: JSON.parse(r.tags as string || '[]'),
+      tags: safeJsonParse(r.tags as string, []),
     };
   }
 
@@ -2672,15 +2841,15 @@ export class SqliteStorage {
       name: r.name as string,
       type: r.type as SemanticEntity['type'],
       description: r.description as string,
-      content: r.content ? JSON.parse(r.content as string) : null,
-      procedure: r.procedure ? JSON.parse(r.procedure as string) : undefined,
-      observations: JSON.parse(r.observations as string || '[]'),
+      content: safeJsonParseOptional(r.content as string) ?? null,
+      procedure: safeJsonParseOptional(r.procedure as string),
+      observations: safeJsonParse(r.observations as string, []),
       confidence: r.confidence as number,
       source: r.source as SemanticEntity['source'],
       createdAt: r.created_at as number,
       updatedAt: r.updated_at as number,
       version: r.version as number,
-      tags: JSON.parse(r.tags as string || '[]'),
+      tags: safeJsonParse(r.tags as string, []),
     };
   }
 
@@ -2741,7 +2910,7 @@ export class SqliteStorage {
       to: r.to_entity as string,
       relationType: r.relation_type as string,
       strength: r.strength as number,
-      metadata: r.metadata ? JSON.parse(r.metadata as string) : undefined,
+      metadata: safeJsonParseOptional(r.metadata as string),
       createdAt: r.created_at as number,
     };
   }
@@ -2947,11 +3116,11 @@ export class SqliteStorage {
       id: row.id as string,
       key: row.key as string,
       namespace: row.namespace as string,
-      value: JSON.parse(row.value as string),
-      visibility: JSON.parse(row.visibility as string),
+      value: safeJsonParse(row.value as string, {}),
+      visibility: safeJsonParse(row.visibility as string, []),
       owner: row.owner as string,
-      vectorClock: JSON.parse(row.vector_clock as string),
-      tags: JSON.parse(row.tags as string || '[]'),
+      vectorClock: safeJsonParse(row.vector_clock as string, {}),
+      tags: safeJsonParse(row.tags as string, []),
       createdAt: row.created_at as number,
       updatedAt: row.updated_at as number,
       syncSeq: row.sync_seq as number,
@@ -3100,7 +3269,7 @@ export class SqliteStorage {
         target: obj.target as string | undefined,
         result: obj.result as string,
         reason: obj.reason as string | undefined,
-        metadata: obj.metadata ? JSON.parse(obj.metadata as string) : undefined,
+        metadata: safeJsonParseOptional(obj.metadata as string),
         team: obj.team as string | undefined,
         sessionId: obj.session_id as string | undefined,
         ipAddress: obj.ip_address as string | undefined,
