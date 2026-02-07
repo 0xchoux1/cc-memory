@@ -7,6 +7,7 @@ import { SqliteStorage } from '../storage/SqliteStorage.js';
 import { WorkingMemory, type WorkingMemoryConfig } from './WorkingMemory.js';
 import { EpisodicMemory } from './EpisodicMemory.js';
 import { SemanticMemory } from './SemanticMemory.js';
+import { DIKWPipeline } from '../dikw/DIKWPipeline.js';
 import type {
   StorageConfig,
   MemoryStats,
@@ -1051,6 +1052,74 @@ export class MemoryManager {
   }
 
   /**
+   * Run DIKW pattern detection on session end (N4+P7).
+   * Automatically detects patterns from recent episodes and creates pattern candidates.
+   * This mimics the brain's offline processing during sleep that strengthens patterns.
+   *
+   * @param options Configuration for auto-DIKW
+   * @returns Created patterns count
+   */
+  runSessionEndDIKW(options?: {
+    /** Minimum confidence for auto-creating patterns (default: 0.6) */
+    minConfidence?: number;
+    /** Maximum age of episodes to consider in days (default: 7) */
+    maxAgeDays?: number;
+    /** Whether to only analyze or also create (default: true = create) */
+    autoCreate?: boolean;
+  }): {
+    patternsAnalyzed: number;
+    patternsCreated: number;
+    insightsCreated: number;
+    wisdomCreated: number;
+  } {
+    const {
+      minConfidence = 0.6,
+      maxAgeDays = 7,
+      autoCreate = true,
+    } = options ?? {};
+
+    const pipeline = new DIKWPipeline(this.storage, {
+      maxEpisodeAgeDays: maxAgeDays,
+    });
+
+    const analysis = pipeline.analyze();
+    const result = {
+      patternsAnalyzed: analysis.patternCandidates.length,
+      patternsCreated: 0,
+      insightsCreated: 0,
+      wisdomCreated: 0,
+    };
+
+    if (autoCreate) {
+      // Auto-create high-confidence patterns
+      for (const candidate of analysis.patternCandidates) {
+        if (candidate.confidence >= minConfidence) {
+          pipeline.createPatternFromCandidate(candidate);
+          result.patternsCreated++;
+        }
+      }
+
+      // Auto-create insights from high-frequency patterns
+      for (const candidate of analysis.insightCandidates) {
+        if (candidate.confidence >= minConfidence) {
+          pipeline.createInsightFromCandidate(candidate);
+          result.insightsCreated++;
+        }
+      }
+
+      // Auto-create wisdom from validated insights
+      for (const candidate of analysis.wisdomCandidates) {
+        if (candidate.confidence >= minConfidence) {
+          pipeline.createWisdomFromCandidate(candidate);
+          result.wisdomCreated++;
+        }
+      }
+    }
+
+    return result;
+  }
+
+  /**
    * Cluster similar episodes based on tags, type, and content (P3).
    *
    * This method groups episodes that share common characteristics,
@@ -1557,11 +1626,26 @@ export class MemoryManager {
 
   /**
    * Close the memory manager and release resources.
-   * Automatically consolidates high-priority working memory before closing.
+   * Automatically consolidates high-priority working memory before closing,
+   * and runs DIKW pattern detection to capture session learnings.
    */
   close(): void {
-    // Consolidate important working memory before shutdown
-    this.consolidateOnSessionEnd();
+    // Consolidate important working memory before shutdown (N4)
+    const consolidation = this.consolidateOnSessionEnd();
+    if (consolidation.consolidated > 0) {
+      console.error(`[cc-memory] Session end: consolidated ${consolidation.consolidated} working memory items`);
+    }
+
+    // Run DIKW pattern detection on session end (P7)
+    try {
+      const dikwResult = this.runSessionEndDIKW();
+      if (dikwResult.patternsCreated > 0 || dikwResult.insightsCreated > 0) {
+        console.error(`[cc-memory] Session end DIKW: ${dikwResult.patternsCreated} patterns, ${dikwResult.insightsCreated} insights created`);
+      }
+    } catch (error) {
+      // Don't fail shutdown on DIKW errors
+      console.error(`[cc-memory] DIKW analysis error: ${(error as Error).message}`);
+    }
 
     if (this.cleanupInterval) {
       clearInterval(this.cleanupInterval);
