@@ -38,6 +38,8 @@ import {
   SmartRecallSchema,
   ReconsolidationCandidatesSchema,
   MergeEpisodesSchema,
+  ClusterEpisodesSchema,
+  CompressMemoriesSchema,
   MemoryDecaySchema,
   MemoryBoostSchema,
   // Tachikoma & Agent & Wisdom schemas
@@ -456,6 +458,26 @@ server.tool(
   MergeEpisodesSchema.shape,
   async (args) => {
     const result = handlers.merge_episodes(args as z.infer<typeof MergeEpisodesSchema>);
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  'cluster_episodes',
+  'Cluster similar episodes based on tags, type, and content',
+  ClusterEpisodesSchema.shape,
+  async (args) => {
+    const result = handlers.cluster_episodes(args as z.infer<typeof ClusterEpisodesSchema>);
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  'compress_memories',
+  'Compress episodic memory by clustering and summarizing similar episodes',
+  CompressMemoriesSchema.shape,
+  async (args) => {
+    const result = handlers.compress_memories(args as z.infer<typeof CompressMemoriesSchema>);
     return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
   }
 );

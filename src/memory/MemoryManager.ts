@@ -626,8 +626,8 @@ export class MemoryManager {
       // Skip self
       if (candidate.id === episodeId) continue;
 
-      // Skip older episodes if newerOnly (use < to allow same-millisecond recordings)
-      if (newerOnly && candidate.timestamp < sourceEpisode.timestamp) continue;
+      // Skip older or same-age episodes if newerOnly (strictly newer)
+      if (newerOnly && candidate.timestamp <= sourceEpisode.timestamp) continue;
 
       // Skip already related episodes
       if (sourceEpisode.relatedEpisodes.includes(candidate.id)) continue;
@@ -923,6 +923,278 @@ export class MemoryManager {
     }
 
     return { consolidated: consolidated.length, items: consolidated };
+  }
+
+  /**
+   * Cluster similar episodes based on tags, type, and content (P3).
+   *
+   * This method groups episodes that share common characteristics,
+   * preparing them for summarization and compression.
+   *
+   * @param options Configuration for clustering
+   * @returns Array of episode clusters
+   */
+  clusterSimilarEpisodes(options?: {
+    /** Episode type to cluster (all types if not specified) */
+    type?: EpisodicMemoryType['type'];
+    /** Minimum tag overlap ratio to group episodes (default: 0.4) */
+    minTagOverlap?: number;
+    /** Minimum cluster size (default: 3) */
+    minClusterSize?: number;
+    /** Maximum age of episodes to consider in days (default: 30) */
+    maxAgeDays?: number;
+    /** Maximum number of episodes to analyze (default: 200) */
+    limit?: number;
+  }): Array<{
+    centroidTags: string[];
+    episodes: EpisodicMemoryType[];
+    avgImportance: number;
+    commonType: EpisodicMemoryType['type'];
+  }> {
+    const {
+      type,
+      minTagOverlap = 0.4,
+      minClusterSize = 3,
+      maxAgeDays = 30,
+      limit = 200,
+    } = options || {};
+
+    const cutoffTime = Date.now() - (maxAgeDays * 24 * 60 * 60 * 1000);
+
+    // Get episodes to cluster
+    const episodes = this.episodic.search({
+      type,
+      limit,
+    }).filter(ep =>
+      ep.timestamp >= cutoffTime &&
+      ep.tags.length > 0 &&
+      !ep.tags.includes('summary') // Exclude existing summaries
+    );
+
+    if (episodes.length < minClusterSize) {
+      return [];
+    }
+
+    // Simple greedy clustering based on tag overlap
+    const clusters: Array<{
+      centroidTags: string[];
+      episodes: EpisodicMemoryType[];
+      avgImportance: number;
+      commonType: EpisodicMemoryType['type'];
+    }> = [];
+
+    const clustered = new Set<string>();
+
+    for (const episode of episodes) {
+      if (clustered.has(episode.id)) continue;
+
+      // Find all episodes with sufficient tag overlap
+      const clusterMembers: EpisodicMemoryType[] = [episode];
+      const episodeTags = new Set(episode.tags);
+
+      for (const other of episodes) {
+        if (other.id === episode.id || clustered.has(other.id)) continue;
+        if (other.type !== episode.type) continue;
+
+        // Calculate tag overlap
+        const otherTags = new Set(other.tags);
+        const commonTags = [...episodeTags].filter(t => otherTags.has(t));
+        const overlap = commonTags.length / Math.max(episodeTags.size, otherTags.size);
+
+        if (overlap >= minTagOverlap) {
+          clusterMembers.push(other);
+        }
+      }
+
+      if (clusterMembers.length >= minClusterSize) {
+        // Mark all as clustered
+        for (const member of clusterMembers) {
+          clustered.add(member.id);
+        }
+
+        // Find centroid tags (tags that appear in majority of cluster)
+        const tagCounts = new Map<string, number>();
+        for (const member of clusterMembers) {
+          for (const tag of member.tags) {
+            tagCounts.set(tag, (tagCounts.get(tag) || 0) + 1);
+          }
+        }
+
+        const centroidTags = [...tagCounts.entries()]
+          .filter(([_, count]) => count >= clusterMembers.length * 0.5)
+          .sort((a, b) => b[1] - a[1])
+          .map(([tag]) => tag);
+
+        const avgImportance = clusterMembers.reduce((sum, e) => sum + e.importance, 0) / clusterMembers.length;
+
+        clusters.push({
+          centroidTags,
+          episodes: clusterMembers,
+          avgImportance,
+          commonType: episode.type,
+        });
+      }
+    }
+
+    return clusters;
+  }
+
+  /**
+   * Create a summary episode from a cluster of similar episodes (P3).
+   *
+   * The summary combines key information from all episodes in the cluster,
+   * and links back to the original episodes.
+   *
+   * @param cluster The cluster to summarize
+   * @param options Summary options
+   * @returns The created summary episode
+   */
+  summarizeCluster(cluster: {
+    centroidTags: string[];
+    episodes: EpisodicMemoryType[];
+    avgImportance: number;
+    commonType: EpisodicMemoryType['type'];
+  }, options?: {
+    /** Custom summary (auto-generated if not provided) */
+    customSummary?: string;
+    /** Reduce original episode importance by this factor (default: 0.4) */
+    originalImportanceReduction?: number;
+  }): EpisodicMemoryType {
+    const {
+      customSummary,
+      originalImportanceReduction = 0.4,
+    } = options || {};
+
+    // Collect all unique learnings from the cluster
+    const allLearnings: string[] = [];
+    for (const episode of cluster.episodes) {
+      if (episode.outcome?.learnings) {
+        for (const learning of episode.outcome.learnings) {
+          if (!allLearnings.includes(learning)) {
+            allLearnings.push(learning);
+          }
+        }
+      }
+    }
+
+    // Generate summary text
+    const typeDescriptions: Record<string, string> = {
+      success: 'successes',
+      error: 'errors',
+      milestone: 'milestones',
+      incident: 'incidents',
+      interaction: 'interactions',
+    };
+
+    const summary = customSummary ||
+      `Summary: ${cluster.episodes.length} ${typeDescriptions[cluster.commonType] || 'episodes'} related to ${cluster.centroidTags.slice(0, 3).join(', ')}`;
+
+    // Combine details from top episodes
+    const topEpisodes = cluster.episodes
+      .sort((a, b) => b.importance - a.importance)
+      .slice(0, 5);
+
+    const details = [
+      `Summarized from ${cluster.episodes.length} episodes`,
+      '',
+      'Key episodes:',
+      ...topEpisodes.map((ep, i) => `${i + 1}. ${ep.summary}`),
+    ].join('\n');
+
+    // Determine appropriate importance (slightly higher than average)
+    const summaryImportance = Math.min(10, Math.ceil(cluster.avgImportance * 1.2));
+
+    // Create the summary episode
+    const summaryEpisode = this.episodic.record({
+      type: cluster.commonType,
+      summary,
+      details,
+      importance: summaryImportance,
+      tags: [...cluster.centroidTags, 'summary', 'compressed'],
+      outcome: allLearnings.length > 0 ? {
+        status: 'success',
+        learnings: allLearnings,
+      } : undefined,
+    });
+
+    // Link all original episodes to the summary and reduce their importance
+    for (const episode of cluster.episodes) {
+      this.episodic.relate(episode.id, summaryEpisode.id);
+
+      const newImportance = Math.max(1, Math.floor(episode.importance * originalImportanceReduction));
+      if (newImportance !== episode.importance) {
+        this.episodic.updateImportance(episode.id, newImportance);
+      }
+    }
+
+    return summaryEpisode;
+  }
+
+  /**
+   * Compress episodic memory by clustering and summarizing similar episodes (P3).
+   *
+   * This mimics how human memory schematizes related experiences into
+   * general patterns while forgetting specific details. It helps reduce
+   * noise during recall by grouping similar episodes under summaries.
+   *
+   * @param options Compression options
+   * @returns Compression results
+   */
+  compressMemories(options?: {
+    /** Episode type to compress (all types if not specified) */
+    type?: EpisodicMemoryType['type'];
+    /** Minimum tag overlap ratio (default: 0.4) */
+    minTagOverlap?: number;
+    /** Minimum cluster size (default: 3) */
+    minClusterSize?: number;
+    /** Maximum age of episodes to consider (default: 30 days) */
+    maxAgeDays?: number;
+    /** Reduce original episode importance (default: 0.4) */
+    originalImportanceReduction?: number;
+  }): {
+    clustersFound: number;
+    episodesCompressed: number;
+    summariesCreated: Array<{ id: string; summary: string; episodeCount: number }>;
+  } {
+    const {
+      type,
+      minTagOverlap,
+      minClusterSize,
+      maxAgeDays,
+      originalImportanceReduction,
+    } = options || {};
+
+    // Find clusters
+    const clusters = this.clusterSimilarEpisodes({
+      type,
+      minTagOverlap,
+      minClusterSize,
+      maxAgeDays,
+    });
+
+    const summariesCreated: Array<{ id: string; summary: string; episodeCount: number }> = [];
+    let episodesCompressed = 0;
+
+    // Create summaries for each cluster
+    for (const cluster of clusters) {
+      const summaryEpisode = this.summarizeCluster(cluster, {
+        originalImportanceReduction,
+      });
+
+      summariesCreated.push({
+        id: summaryEpisode.id,
+        summary: summaryEpisode.summary,
+        episodeCount: cluster.episodes.length,
+      });
+
+      episodesCompressed += cluster.episodes.length;
+    }
+
+    return {
+      clustersFound: clusters.length,
+      episodesCompressed,
+      summariesCreated,
+    };
   }
 
   /**

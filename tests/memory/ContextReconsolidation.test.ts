@@ -272,7 +272,7 @@ describe('Context-Dependent Retrieval and Reconsolidation', () => {
         expect(candidates[0].mergeReasons.some(r => r.includes('Context match'))).toBe(true);
       });
 
-      it('should respect newerOnly option', () => {
+      it('should respect newerOnly option', async () => {
         // Create older episode first
         const older = manager.episodic.record({
           type: 'error',
@@ -282,6 +282,8 @@ describe('Context-Dependent Retrieval and Reconsolidation', () => {
         });
 
         // Wait a bit to ensure different timestamps
+        await new Promise(resolve => setTimeout(resolve, 5));
+
         const newer = manager.episodic.record({
           type: 'error',
           summary: 'Newer issue',

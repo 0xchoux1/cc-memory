@@ -264,6 +264,32 @@ export const MergeEpisodesSchema = z.object({
     .describe('Factor to reduce merged episode importance by'),
 });
 
+export const ClusterEpisodesSchema = z.object({
+  type: z.enum(['incident', 'interaction', 'milestone', 'error', 'success']).optional()
+    .describe('Episode type to cluster (all types if not specified)'),
+  min_tag_overlap: z.number().min(0).max(1).optional().default(0.4)
+    .describe('Minimum tag overlap ratio to group episodes'),
+  min_cluster_size: z.number().min(2).max(20).optional().default(3)
+    .describe('Minimum number of episodes to form a cluster'),
+  max_age_days: z.number().min(1).max(365).optional().default(30)
+    .describe('Maximum age of episodes to consider'),
+  limit: z.number().min(10).max(500).optional().default(200)
+    .describe('Maximum number of episodes to analyze'),
+});
+
+export const CompressMemoriesSchema = z.object({
+  type: z.enum(['incident', 'interaction', 'milestone', 'error', 'success']).optional()
+    .describe('Episode type to compress (all types if not specified)'),
+  min_tag_overlap: z.number().min(0).max(1).optional().default(0.4)
+    .describe('Minimum tag overlap ratio to group episodes'),
+  min_cluster_size: z.number().min(2).max(20).optional().default(3)
+    .describe('Minimum cluster size'),
+  max_age_days: z.number().min(1).max(365).optional().default(30)
+    .describe('Maximum age of episodes to consider'),
+  original_importance_reduction: z.number().min(0).max(1).optional().default(0.4)
+    .describe('Factor to reduce importance of compressed episodes'),
+});
+
 export const MemoryDecaySchema = z.object({
   use_ebbinghaus: z.boolean().optional().default(true)
     .describe('Use Ebbinghaus forgetting curve (recommended). If false, uses legacy uniform decay.'),
@@ -927,6 +953,43 @@ export function createToolHandlers(
         mergedImportanceReduction: args.merged_importance_reduction,
       });
       return { success };
+    },
+
+    cluster_episodes: (args: z.infer<typeof ClusterEpisodesSchema>) => {
+      const clusters = memoryManager.clusterSimilarEpisodes({
+        type: args.type,
+        minTagOverlap: args.min_tag_overlap,
+        minClusterSize: args.min_cluster_size,
+        maxAgeDays: args.max_age_days,
+        limit: args.limit,
+      });
+      return {
+        success: true,
+        clusters: clusters.map(c => ({
+          centroid_tags: c.centroidTags,
+          episode_ids: c.episodes.map(e => e.id),
+          episode_count: c.episodes.length,
+          avg_importance: c.avgImportance,
+          common_type: c.commonType,
+        })),
+        total: clusters.length,
+      };
+    },
+
+    compress_memories: (args: z.infer<typeof CompressMemoriesSchema>) => {
+      const result = memoryManager.compressMemories({
+        type: args.type,
+        minTagOverlap: args.min_tag_overlap,
+        minClusterSize: args.min_cluster_size,
+        maxAgeDays: args.max_age_days,
+        originalImportanceReduction: args.original_importance_reduction,
+      });
+      return {
+        success: true,
+        clusters_found: result.clustersFound,
+        episodes_compressed: result.episodesCompressed,
+        summaries_created: result.summariesCreated,
+      };
     },
 
     memory_decay: (args: z.infer<typeof MemoryDecaySchema>) => {
