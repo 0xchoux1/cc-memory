@@ -45,6 +45,7 @@ import type {
 } from '../memory/types.js';
 import { safeJsonParse, safeJsonParseOptional } from '../utils/safeJson.js';
 import { SearchManager } from '../search/SearchManager.js';
+import { MigrationRunner, allMigrations } from './migrations/index.js';
 
 export class SqliteStorage {
   private db: SqlJsDatabase | null = null;
@@ -54,8 +55,10 @@ export class SqliteStorage {
   private initPromise: Promise<void> | null = null;
   private dirty: boolean = false;
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
+  private inTransaction: boolean = false;
   private static readonly SAVE_DEBOUNCE_MS = 1000;
   private searchManager: SearchManager;
+  private migrationRunner: MigrationRunner | null = null;
 
   constructor(config: StorageConfig) {
     this.config = config;
@@ -89,6 +92,17 @@ export class SqliteStorage {
     }
 
     this.createTables();
+
+    // Run database migrations
+    this.migrationRunner = new MigrationRunner(this.db);
+    this.migrationRunner.registerAll(allMigrations);
+    const migrationResult = this.migrationRunner.migrate();
+    if (migrationResult.applied.length > 0) {
+      console.log(`[SqliteStorage] Applied migrations: ${migrationResult.applied.join(', ')}`);
+    }
+    if (migrationResult.errors.length > 0) {
+      console.error('[SqliteStorage] Migration errors:', migrationResult.errors);
+    }
 
     // Initialize search index
     this.searchManager.setDatabase(this.db);
@@ -490,11 +504,67 @@ export class SqliteStorage {
    */
   private markDirty(): void {
     this.dirty = true;
-    if (this.saveTimer) return; // already scheduled
+    if (this.saveTimer || this.inTransaction) return; // don't save during transaction
     this.saveTimer = setTimeout(() => {
       this.saveTimer = null;
       this.flush();
     }, SqliteStorage.SAVE_DEBOUNCE_MS);
+  }
+
+  // ============================================================================
+  // Transaction Support
+  // ============================================================================
+
+  /**
+   * Begin a database transaction.
+   * Use for compound operations that should be atomic.
+   */
+  beginTransaction(): void {
+    if (!this.db || this.inTransaction) return;
+    this.db.run('BEGIN TRANSACTION');
+    this.inTransaction = true;
+  }
+
+  /**
+   * Commit the current transaction.
+   */
+  commit(): void {
+    if (!this.db || !this.inTransaction) return;
+    this.db.run('COMMIT');
+    this.inTransaction = false;
+    this.markDirty();
+  }
+
+  /**
+   * Rollback the current transaction.
+   */
+  rollback(): void {
+    if (!this.db || !this.inTransaction) return;
+    this.db.run('ROLLBACK');
+    this.inTransaction = false;
+  }
+
+  /**
+   * Execute a function within a transaction.
+   * Automatically commits on success, rolls back on error.
+   */
+  transaction<T>(fn: () => T): T {
+    this.beginTransaction();
+    try {
+      const result = fn();
+      this.commit();
+      return result;
+    } catch (error) {
+      this.rollback();
+      throw error;
+    }
+  }
+
+  /**
+   * Check if currently in a transaction.
+   */
+  isInTransaction(): boolean {
+    return this.inTransaction;
   }
 
   /**
@@ -1245,6 +1315,20 @@ export class SqliteStorage {
     };
   }
 
+  /**
+   * Get schema migration status
+   */
+  getMigrationStatus(): {
+    current: string | null;
+    pending: string[];
+    applied: Array<{ version: string; name: string; appliedAt: number }>;
+  } {
+    if (!this.migrationRunner) {
+      return { current: null, pending: [], applied: [] };
+    }
+    return this.migrationRunner.status();
+  }
+
   export(): MemoryExport {
     const working = this.listWorkingItems({ includeExpired: false });
 
@@ -1348,7 +1432,8 @@ export class SqliteStorage {
   }
 
   /**
-   * Import memory data from an export
+   * Import memory data from an export.
+   * Wrapped in a transaction for atomicity - if any part fails, the entire import is rolled back.
    */
   import(data: MemoryExport, options?: {
     overwrite?: boolean;
@@ -1362,6 +1447,8 @@ export class SqliteStorage {
     };
 
     if (!this.db) return result;
+
+    return this.transaction(() => {
 
     const { overwrite = false, skipWorking = false, skipEpisodic = false, skipSemantic = false } = options || {};
 
@@ -1439,6 +1526,7 @@ export class SqliteStorage {
 
     this.save();
     return result;
+    }); // end transaction
   }
 
   /**
@@ -2550,7 +2638,8 @@ export class SqliteStorage {
   }
 
   /**
-   * Import delta data from another Tachikoma with conflict resolution
+   * Import delta data from another Tachikoma with conflict resolution.
+   * Wrapped in a transaction for atomicity - if any part fails, the entire import is rolled back.
    */
   importDelta(
     data: ParallelizationExport,
@@ -2564,6 +2653,17 @@ export class SqliteStorage {
     const profile = this.getTachikomaProfile();
     if (!profile) throw new Error('Tachikoma not initialized. Run tachikoma_init first.');
 
+    return this.transaction(() => this.importDeltaInternal(data, profile, options));
+  }
+
+  private importDeltaInternal(
+    data: ParallelizationExport,
+    profile: TachikomaProfile,
+    options?: {
+      strategy?: ConflictStrategy;
+      autoResolve?: boolean;
+    }
+  ): ParallelizationResult {
     const strategy = options?.strategy || 'merge_learnings';
     const autoResolve = options?.autoResolve !== false;
 

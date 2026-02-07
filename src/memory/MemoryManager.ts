@@ -437,6 +437,7 @@ export class MemoryManager {
   /**
    * Apply importance decay to episodic memories
    * Call this periodically to naturally age memories
+   * @deprecated Use applyEbbinghausDecay for more accurate memory modeling
    */
   applyImportanceDecay(options?: {
     decayFactor?: number;
@@ -468,6 +469,67 @@ export class MemoryManager {
     }
 
     return { updated };
+  }
+
+  /**
+   * Apply Ebbinghaus forgetting curve with SM-2 style spaced repetition.
+   * Memories that are accessed more frequently decay much slower.
+   *
+   * The retention formula: R = e^(-t / S)
+   * Where:
+   *   - t = time since last access (in days)
+   *   - S = stability (derived from access count)
+   *
+   * Stability increases with each access, making memories more resistant to decay.
+   */
+  applyEbbinghausDecay(options?: {
+    minImportance?: number;
+    olderThanDays?: number;
+    baseStability?: number;
+    stabilityGrowthFactor?: number;
+  }): { updated: number; decayed: Array<{ id: string; from: number; to: number }> } {
+    const {
+      minImportance = 1,
+      olderThanDays = 1,
+      baseStability = 1,           // Base stability in days
+      stabilityGrowthFactor = 1.5, // Stability multiplier per access
+    } = options || {};
+
+    const now = Date.now();
+    const cutoffTime = now - (olderThanDays * 24 * 60 * 60 * 1000);
+    const episodes = this.episodic.search({ limit: 1000 });
+    let updated = 0;
+    const decayed: Array<{ id: string; from: number; to: number }> = [];
+
+    for (const episode of episodes) {
+      // Only decay memories older than the threshold
+      if (episode.lastAccessed < cutoffTime && episode.importance > minImportance) {
+        // Calculate stability: S = baseStability * (stabilityGrowthFactor ^ accessCount)
+        // More accesses = higher stability = slower decay
+        const stability = baseStability * Math.pow(stabilityGrowthFactor, episode.accessCount);
+
+        // Time since last access in days
+        const timeSinceAccess = (now - episode.lastAccessed) / (24 * 60 * 60 * 1000);
+
+        // Ebbinghaus retention: R = e^(-t/S)
+        // We scale importance by retention
+        const retention = Math.exp(-timeSinceAccess / stability);
+
+        // Apply retention to importance
+        const newImportance = Math.max(
+          minImportance,
+          Math.round(episode.importance * retention)
+        );
+
+        if (newImportance < episode.importance) {
+          this.episodic.updateImportance(episode.id, newImportance);
+          decayed.push({ id: episode.id, from: episode.importance, to: newImportance });
+          updated++;
+        }
+      }
+    }
+
+    return { updated, decayed };
   }
 
   /**
@@ -505,9 +567,45 @@ export class MemoryManager {
   }
 
   /**
-   * Close the memory manager and release resources
+   * Consolidate high-priority working memory to episodic memory on session end.
+   * Mimics the brain's "sleep consolidation" where important short-term memories
+   * are transferred to long-term storage.
+   */
+  consolidateOnSessionEnd(): { consolidated: number; items: string[] } {
+    const workingItems = this.working.list();
+    const consolidated: string[] = [];
+
+    for (const item of workingItems) {
+      // Only consolidate high and medium priority items
+      if (item.metadata.priority === 'high' || item.metadata.priority === 'medium') {
+        const importance = item.metadata.priority === 'high' ? 7 : 5;
+
+        this.episodic.record({
+          type: 'interaction',
+          summary: `Session end consolidation: ${item.key}`,
+          details: typeof item.value === 'string'
+            ? item.value
+            : JSON.stringify(item.value, null, 2),
+          importance,
+          tags: [...item.tags, 'session-consolidated', `priority-${item.metadata.priority}`],
+        });
+
+        this.working.delete(item.key);
+        consolidated.push(item.key);
+      }
+    }
+
+    return { consolidated: consolidated.length, items: consolidated };
+  }
+
+  /**
+   * Close the memory manager and release resources.
+   * Automatically consolidates high-priority working memory before closing.
    */
   close(): void {
+    // Consolidate important working memory before shutdown
+    this.consolidateOnSessionEnd();
+
     if (this.cleanupInterval) {
       clearInterval(this.cleanupInterval);
       this.cleanupInterval = null;

@@ -60,6 +60,10 @@ import {
   WisdomGetSchema,
   WisdomSearchSchema,
   WisdomApplySchema,
+  // Unified high-level tools
+  UnifiedMemoryStoreSchema,
+  UnifiedMemoryUpdateSchema,
+  UnifiedMemoryForgetSchema,
 } from './server/tools.js';
 import { SqliteStorage } from './storage/SqliteStorage.js';
 
@@ -665,6 +669,37 @@ server.tool(
   WisdomApplySchema.shape,
   async (args) => {
     const result = handlers.wisdom_apply(args as z.infer<typeof WisdomApplySchema>);
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+// Unified High-Level Tools (simplified interface)
+server.tool(
+  'memory_store',
+  'Store a memory (auto-selects working/episodic/semantic based on content)',
+  UnifiedMemoryStoreSchema.shape,
+  async (args) => {
+    const result = handlers.memory_store(args as z.infer<typeof UnifiedMemoryStoreSchema>);
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  'memory_update',
+  'Update any memory type by ID',
+  UnifiedMemoryUpdateSchema.shape,
+  async (args) => {
+    const result = handlers.memory_update(args as z.infer<typeof UnifiedMemoryUpdateSchema>);
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  'memory_forget',
+  'Forget/delete a memory or apply decay',
+  UnifiedMemoryForgetSchema.shape,
+  async (args) => {
+    const result = handlers.memory_forget(args as z.infer<typeof UnifiedMemoryForgetSchema>);
     return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
   }
 );

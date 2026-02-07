@@ -229,12 +229,18 @@ export const SmartRecallSchema = z.object({
 });
 
 export const MemoryDecaySchema = z.object({
+  use_ebbinghaus: z.boolean().optional().default(true)
+    .describe('Use Ebbinghaus forgetting curve (recommended). If false, uses legacy uniform decay.'),
   decay_factor: z.number().min(0).max(1).optional().default(0.95)
-    .describe('Decay multiplier (0.95 = 5% decay)'),
+    .describe('Legacy: Decay multiplier (0.95 = 5% decay). Only used if use_ebbinghaus=false.'),
   min_importance: z.number().min(1).max(10).optional().default(1)
     .describe('Minimum importance to decay to'),
-  older_than_days: z.number().optional().default(7)
+  older_than_days: z.number().optional().default(1)
     .describe('Only decay memories older than this many days'),
+  base_stability: z.number().min(0.1).max(30).optional().default(1)
+    .describe('Base stability in days. Higher = slower initial decay.'),
+  stability_growth_factor: z.number().min(1).max(3).optional().default(1.5)
+    .describe('How much stability grows per access. 1.5 means each access increases stability by 50%.'),
 });
 
 export const MemoryBoostSchema = z.object({
@@ -244,6 +250,38 @@ export const MemoryBoostSchema = z.object({
     .describe('Maximum importance to boost to'),
   min_access_count: z.number().optional().default(5)
     .describe('Minimum access count to qualify for boost'),
+});
+
+// ============================================================================
+// Unified High-Level Schemas (P1: Reduced tool surface)
+// ============================================================================
+
+export const UnifiedMemoryStoreSchema = z.object({
+  content: z.string().describe('The content to store'),
+  type: z.enum(['working', 'episodic', 'semantic', 'auto']).optional().default('auto')
+    .describe('Memory type. Use "auto" for automatic selection based on content.'),
+  key: z.string().optional().describe('Key for working memory (required if type=working)'),
+  name: z.string().optional().describe('Name for semantic entities (required if type=semantic)'),
+  importance: z.number().min(1).max(10).optional().default(5)
+    .describe('Importance level (1-10)'),
+  tags: z.array(z.string()).optional().default([])
+    .describe('Tags for categorization'),
+  metadata: z.record(z.unknown()).optional()
+    .describe('Additional metadata'),
+});
+
+export const UnifiedMemoryUpdateSchema = z.object({
+  id: z.string().describe('ID of the memory to update'),
+  type: z.enum(['working', 'episodic', 'semantic']).describe('Memory type'),
+  updates: z.record(z.unknown()).describe('Fields to update'),
+});
+
+export const UnifiedMemoryForgetSchema = z.object({
+  id: z.string().optional().describe('ID of specific memory to forget'),
+  type: z.enum(['working', 'episodic', 'semantic']).optional().describe('Memory type'),
+  key: z.string().optional().describe('Key for working memory'),
+  tags: z.array(z.string()).optional().describe('Forget all with these tags'),
+  older_than_days: z.number().optional().describe('Forget memories older than N days'),
 });
 
 // ============================================================================
@@ -820,12 +858,24 @@ export function createToolHandlers(
     },
 
     memory_decay: (args: z.infer<typeof MemoryDecaySchema>) => {
-      const result = memoryManager.applyImportanceDecay({
-        decayFactor: args.decay_factor,
-        minImportance: args.min_importance,
-        olderThanDays: args.older_than_days,
-      });
-      return { success: true, ...result };
+      if (args.use_ebbinghaus) {
+        // Use Ebbinghaus forgetting curve with spaced repetition
+        const result = memoryManager.applyEbbinghausDecay({
+          minImportance: args.min_importance,
+          olderThanDays: args.older_than_days,
+          baseStability: args.base_stability,
+          stabilityGrowthFactor: args.stability_growth_factor,
+        });
+        return { success: true, method: 'ebbinghaus', ...result };
+      } else {
+        // Legacy uniform decay
+        const result = memoryManager.applyImportanceDecay({
+          decayFactor: args.decay_factor,
+          minImportance: args.min_importance,
+          olderThanDays: args.older_than_days,
+        });
+        return { success: true, method: 'legacy', ...result };
+      }
     },
 
     memory_boost: (args: z.infer<typeof MemoryBoostSchema>) => {
@@ -835,6 +885,153 @@ export function createToolHandlers(
         minAccessCount: args.min_access_count,
       });
       return { success: true, ...result };
+    },
+
+    // ============================================================================
+    // Unified High-Level Tools (P1: Reduced tool surface)
+    // ============================================================================
+
+    /**
+     * Unified memory store - automatically selects the appropriate memory layer
+     */
+    memory_store: (args: z.infer<typeof UnifiedMemoryStoreSchema>) => {
+      const { content, type, key, name, importance, tags, metadata } = args;
+
+      // Auto-select memory type based on content characteristics
+      let selectedType = type;
+      if (type === 'auto') {
+        // Heuristics for auto-selection:
+        // - Short, key-value like content → working
+        // - Event/action description → episodic
+        // - Concept/fact/procedure → semantic
+        const contentLower = content.toLowerCase();
+        if (key || content.length < 100) {
+          selectedType = 'working';
+        } else if (
+          contentLower.includes('learned') ||
+          contentLower.includes('completed') ||
+          contentLower.includes('error') ||
+          contentLower.includes('fixed') ||
+          contentLower.includes('implemented')
+        ) {
+          selectedType = 'episodic';
+        } else {
+          selectedType = 'semantic';
+        }
+      }
+
+      switch (selectedType) {
+        case 'working': {
+          const workingKey = key || `auto_${Date.now()}`;
+          const item = memoryManager.working.set({
+            key: workingKey,
+            value: metadata ? { content, ...metadata } : content,
+            priority: importance >= 7 ? 'high' : importance >= 4 ? 'medium' : 'low',
+            tags,
+          });
+          return { success: true, type: 'working', id: item.id, key: workingKey };
+        }
+        case 'episodic': {
+          const episode = memoryManager.episodic.record({
+            type: 'interaction',
+            summary: content.substring(0, 200),
+            details: content,
+            importance,
+            tags,
+          });
+          return { success: true, type: 'episodic', id: episode.id };
+        }
+        case 'semantic': {
+          const entityName = name || `entity_${Date.now()}`;
+          const entity = memoryManager.semantic.create({
+            name: entityName,
+            type: 'fact',
+            description: content,
+            tags,
+            confidence: importance / 10,
+          });
+          return { success: true, type: 'semantic', id: entity.id, name: entityName };
+        }
+        default:
+          return { success: false, error: `Unknown type: ${selectedType}` };
+      }
+    },
+
+    /**
+     * Unified memory update - update any memory type by ID
+     */
+    memory_update: (args: z.infer<typeof UnifiedMemoryUpdateSchema>) => {
+      const { id, type, updates } = args;
+
+      switch (type) {
+        case 'working': {
+          const existing = memoryManager.working.get(id);
+          if (!existing) {
+            return { success: false, error: 'Working memory item not found' };
+          }
+          const updated = memoryManager.working.set({
+            key: existing.key,
+            value: updates.value !== undefined ? updates.value : existing.value,
+            priority: (updates.priority as 'high' | 'medium' | 'low') || existing.metadata.priority,
+            tags: (updates.tags as string[]) || existing.tags,
+          });
+          return { success: true, id: updated.id };
+        }
+        case 'episodic': {
+          const success = memoryManager.getStorage().updateEpisode(id, updates);
+          return { success, id };
+        }
+        case 'semantic': {
+          const success = memoryManager.getStorage().updateEntity(id, updates);
+          return { success, id };
+        }
+        default:
+          return { success: false, error: `Unknown type: ${type}` };
+      }
+    },
+
+    /**
+     * Unified memory forget - delete or decay memories
+     */
+    memory_forget: (args: z.infer<typeof UnifiedMemoryForgetSchema>) => {
+      const { id, type, key, tags, older_than_days } = args;
+      let deleted = 0;
+
+      // Delete by specific ID/key
+      if (id && type) {
+        switch (type) {
+          case 'working':
+            if (memoryManager.working.delete(id)) deleted++;
+            break;
+          case 'episodic':
+            if (memoryManager.getStorage().deleteEpisode(id)) deleted++;
+            break;
+          case 'semantic':
+            if (memoryManager.getStorage().deleteEntity(id)) deleted++;
+            break;
+        }
+      } else if (key) {
+        if (memoryManager.working.delete(key)) deleted++;
+      }
+
+      // Delete by tags (episodic only for now)
+      if (tags && tags.length > 0) {
+        const episodes = memoryManager.episodic.search({ tags, limit: 1000 });
+        for (const ep of episodes) {
+          if (memoryManager.getStorage().deleteEpisode(ep.id)) deleted++;
+        }
+      }
+
+      // Decay old memories
+      if (older_than_days) {
+        const result = memoryManager.applyEbbinghausDecay({
+          olderThanDays: older_than_days,
+          minImportance: 1,
+        });
+        return { success: true, deleted, decayed: result.updated };
+      }
+
+      return { success: true, deleted };
     },
 
     // ============================================================================
