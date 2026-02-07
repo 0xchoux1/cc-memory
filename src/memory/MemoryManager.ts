@@ -376,12 +376,19 @@ export class MemoryManager {
           // Access frequency boost
           const accessBoost = Math.min(1, episode.accessCount * 0.1);
 
-          const relevanceScore = textMatch > 0
+          // Emotional arousal multiplier: high arousal memories are more memorable
+          // Arousal ranges from 0 to 1, multiplier ranges from 1.0 to 1.3
+          const arousalMultiplier = 1 + (episode.arousal * 0.3);
+
+          const baseScore = textMatch > 0
             ? (textMatch * 0.4) +
               (recencyScore * recencyWeight) +
               (importanceScore * importanceWeight) +
               (accessBoost * 0.1)
             : 0;
+
+          // Apply arousal multiplier to boost emotionally significant memories
+          const relevanceScore = baseScore * arousalMultiplier;
 
           return { ...episode, relevanceScore };
         })

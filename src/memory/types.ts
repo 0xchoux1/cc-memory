@@ -104,6 +104,10 @@ export interface EpisodicMemory {
   lastAccessed: number;
   tags: string[];
   transcriptMetadata?: TranscriptMetadata;
+  /** Emotional valence: -1.0 (negative) to +1.0 (positive) */
+  valence: number;
+  /** Emotional arousal: 0.0 (calm) to 1.0 (excited) */
+  arousal: number;
 }
 
 export interface EpisodicMemoryInput {
@@ -115,6 +119,10 @@ export interface EpisodicMemoryInput {
   importance?: number;
   tags?: string[];
   transcript?: Transcript;
+  /** Emotional valence: -1.0 (negative) to +1.0 (positive). Auto-set based on type if not provided. */
+  valence?: number;
+  /** Emotional arousal: 0.0 (calm) to 1.0 (excited). Auto-set based on type if not provided. */
+  arousal?: number;
 }
 
 export interface EpisodeQuery {

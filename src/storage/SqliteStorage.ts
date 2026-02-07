@@ -727,8 +727,8 @@ export class SqliteStorage {
     this.db.run(`
       INSERT INTO episodic_memory
       (id, timestamp, type, summary, details, context, outcome, related_episodes,
-       related_entities, importance, access_count, last_accessed, tags, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       related_entities, importance, access_count, last_accessed, tags, created_at, valence, arousal)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
       episode.id,
       episode.timestamp,
@@ -744,6 +744,8 @@ export class SqliteStorage {
       episode.lastAccessed,
       JSON.stringify(episode.tags),
       Date.now(),
+      episode.valence ?? 0,
+      episode.arousal ?? 0.5,
     ]);
 
     this.searchManager.indexEpisode(episode);
@@ -762,9 +764,21 @@ export class SqliteStorage {
     outcome?: EpisodicMemory['outcome'];
     importance?: number;
     tags?: string[];
+    valence?: number;
+    arousal?: number;
   }): string {
     const now = Date.now();
     const id = `ep_${now}_${Math.random().toString(36).substr(2, 9)}`;
+
+    // Default emotional values based on episode type
+    const emotionalDefaults: Record<string, { valence: number; arousal: number }> = {
+      error: { valence: -0.7, arousal: 0.8 },
+      incident: { valence: -0.5, arousal: 0.7 },
+      success: { valence: 0.8, arousal: 0.7 },
+      milestone: { valence: 0.9, arousal: 0.9 },
+      interaction: { valence: 0, arousal: 0.5 },
+    };
+    const defaults = emotionalDefaults[input.type] || { valence: 0, arousal: 0.5 };
 
     const episode: EpisodicMemory = {
       id,
@@ -783,6 +797,8 @@ export class SqliteStorage {
       accessCount: 0,
       lastAccessed: now,
       tags: input.tags || [],
+      valence: input.valence ?? defaults.valence,
+      arousal: input.arousal ?? defaults.arousal,
     };
 
     return this.createEpisode(episode);
@@ -963,6 +979,8 @@ export class SqliteStorage {
       accessCount: row.access_count as number,
       lastAccessed: row.last_accessed as number,
       tags: safeJsonParse(row.tags as string, []),
+      valence: (row.valence as number) ?? 0,
+      arousal: (row.arousal as number) ?? 0.5,
     };
   }
 

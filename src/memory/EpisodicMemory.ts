@@ -27,6 +27,9 @@ export class EpisodicMemory {
   record(input: EpisodicMemoryInput): EpisodicMemoryType {
     const now = Date.now();
 
+    // Calculate valence and arousal based on episode type if not provided
+    const { valence, arousal } = this.calculateEmotionalValues(input);
+
     const episode: EpisodicMemoryType = {
       id: uuidv4(),
       timestamp: now,
@@ -49,6 +52,8 @@ export class EpisodicMemory {
         totalChars: JSON.stringify(input.transcript).length,
         hasTranscript: true,
       } : undefined,
+      valence,
+      arousal,
     };
 
     this.storage.createEpisode(episode);
@@ -59,6 +64,45 @@ export class EpisodicMemory {
     }
 
     return episode;
+  }
+
+  /**
+   * Calculate emotional valence and arousal based on episode type.
+   *
+   * Valence: -1.0 (negative) to +1.0 (positive)
+   * Arousal: 0.0 (calm) to 1.0 (excited)
+   *
+   * Type mappings:
+   * - error: negative valence (-0.7), high arousal (0.8)
+   * - incident: negative valence (-0.5), medium-high arousal (0.7)
+   * - success: positive valence (0.8), high arousal (0.7)
+   * - milestone: very positive valence (0.9), very high arousal (0.9)
+   * - interaction: neutral valence (0), medium arousal (0.5)
+   */
+  private calculateEmotionalValues(input: EpisodicMemoryInput): { valence: number; arousal: number } {
+    // Use provided values if available
+    if (input.valence !== undefined && input.arousal !== undefined) {
+      return {
+        valence: Math.max(-1, Math.min(1, input.valence)),
+        arousal: Math.max(0, Math.min(1, input.arousal)),
+      };
+    }
+
+    // Auto-calculate based on episode type
+    const emotionalMapping: Record<string, { valence: number; arousal: number }> = {
+      error: { valence: -0.7, arousal: 0.8 },
+      incident: { valence: -0.5, arousal: 0.7 },
+      success: { valence: 0.8, arousal: 0.7 },
+      milestone: { valence: 0.9, arousal: 0.9 },
+      interaction: { valence: 0, arousal: 0.5 },
+    };
+
+    const defaults = emotionalMapping[input.type] || { valence: 0, arousal: 0.5 };
+
+    return {
+      valence: input.valence ?? defaults.valence,
+      arousal: input.arousal ?? defaults.arousal,
+    };
   }
 
   /**

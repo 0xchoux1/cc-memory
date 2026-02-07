@@ -396,4 +396,93 @@ describe('EpisodicMemory', () => {
       expect(results.length).toBe(1);
     });
   });
+
+  describe('emotional valence and arousal', () => {
+    it('should auto-set valence and arousal for error type', () => {
+      const episode = manager.episodic.record({
+        type: 'error',
+        summary: 'Critical bug',
+        details: 'Something went wrong',
+      });
+
+      // Errors have negative valence and high arousal
+      expect(episode.valence).toBeLessThan(0);
+      expect(episode.arousal).toBeGreaterThan(0.5);
+    });
+
+    it('should auto-set valence and arousal for success type', () => {
+      const episode = manager.episodic.record({
+        type: 'success',
+        summary: 'Feature completed',
+        details: 'Successfully implemented',
+      });
+
+      // Successes have positive valence and high arousal
+      expect(episode.valence).toBeGreaterThan(0);
+      expect(episode.arousal).toBeGreaterThan(0.5);
+    });
+
+    it('should auto-set valence and arousal for milestone type', () => {
+      const episode = manager.episodic.record({
+        type: 'milestone',
+        summary: 'Project launched',
+        details: 'Major milestone achieved',
+      });
+
+      // Milestones have very positive valence and very high arousal
+      expect(episode.valence).toBeGreaterThan(0.8);
+      expect(episode.arousal).toBeGreaterThan(0.8);
+    });
+
+    it('should auto-set neutral valence for interaction type', () => {
+      const episode = manager.episodic.record({
+        type: 'interaction',
+        summary: 'User conversation',
+        details: 'Helped with a question',
+      });
+
+      // Interactions have neutral valence and medium arousal
+      expect(episode.valence).toBe(0);
+      expect(episode.arousal).toBeCloseTo(0.5, 1);
+    });
+
+    it('should use custom valence and arousal when provided', () => {
+      const episode = manager.episodic.record({
+        type: 'interaction',
+        summary: 'Custom emotional',
+        details: 'With custom values',
+        valence: 0.5,
+        arousal: 0.8,
+      });
+
+      expect(episode.valence).toBe(0.5);
+      expect(episode.arousal).toBe(0.8);
+    });
+
+    it('should clamp valence and arousal to valid ranges', () => {
+      const episode = manager.episodic.record({
+        type: 'interaction',
+        summary: 'Out of range',
+        details: 'Testing clamping',
+        valence: 2.0,  // Should be clamped to 1.0
+        arousal: -0.5, // Should be clamped to 0.0
+      });
+
+      expect(episode.valence).toBeLessThanOrEqual(1.0);
+      expect(episode.arousal).toBeGreaterThanOrEqual(0.0);
+    });
+
+    it('should persist valence and arousal after retrieval', () => {
+      const created = manager.episodic.record({
+        type: 'success',
+        summary: 'Persistent test',
+        details: 'Check persistence',
+      });
+
+      const retrieved = manager.episodic.get(created.id);
+
+      expect(retrieved?.valence).toBe(created.valence);
+      expect(retrieved?.arousal).toBe(created.arousal);
+    });
+  });
 });
