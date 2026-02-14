@@ -6,7 +6,9 @@
   "bin": {
     "cc-memory": "dist/cli.js"
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "scripts": {
     "build": "tsc",
@@ -16,8 +18,14 @@
     "test:watch": "vitest",
     "clean": "rm -rf dist"
   },
-  "keywords": ["mcp", "claude", "memory", "ai", "multi-agent"],
-  "author": "",
+  "keywords": [
+    "mcp",
+    "claude",
+    "memory",
+    "ai",
+    "multi-agent"
+  ],
+  "author": "0xchoux1",
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
