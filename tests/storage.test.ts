@@ -20,15 +20,21 @@ describe("Storage", () => {
     it("creates and lists projects", () => {
       storage.createProject("proj1", "Test project");
       const projects = storage.listProjects();
-      expect(projects).toHaveLength(1);
-      expect(projects[0].id).toBe("proj1");
-      expect(projects[0].description).toBe("Test project");
+      // default + proj1
+      expect(projects.length).toBeGreaterThanOrEqual(2);
+      expect(projects.find((p) => p.id === "proj1")).toBeDefined();
     });
 
     it("gets a project by id", () => {
       storage.createProject("proj1", "Test");
       expect(storage.getProject("proj1")).toBeDefined();
       expect(storage.getProject("nope")).toBeUndefined();
+    });
+
+    it("default project exists automatically", () => {
+      const project = storage.getProject("default");
+      expect(project).toBeDefined();
+      expect(project!.id).toBe("default");
     });
   });
 
@@ -85,6 +91,18 @@ describe("Storage", () => {
       const results = storage.searchMemories("TypeScript", "shared", "p1");
       expect(results).toHaveLength(1);
       expect(results[0].content).toContain("TypeScript");
+    });
+
+    it("records created_by", () => {
+      const m = storage.storeMemory("p1", "shared", null, "Team note", null, "agent-x");
+      expect(m.created_by).toBe("agent-x");
+      const fetched = storage.getMemory(m.id);
+      expect(fetched?.created_by).toBe("agent-x");
+    });
+
+    it("created_by defaults to null", () => {
+      const m = storage.storeMemory("p1", "shared", null, "No author", null);
+      expect(m.created_by).toBeNull();
     });
   });
 });

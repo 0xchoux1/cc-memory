@@ -10,6 +10,7 @@ export interface Memory {
   agent_id: string | null;
   content: string;
   tags: string[] | null;
+  created_by: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -39,6 +40,7 @@ export interface MemoryStoreInput {
 export interface MemoryRecallInput {
   scope: Scope | "all";
   agent_id?: string;
+  caller_id?: string;
   query: string;
   project_id?: string;
   limit?: number;
@@ -52,6 +54,8 @@ export interface MemoryListInput {
 
 export interface MemoryDeleteInput {
   memory_id: string;
+  caller_id?: string;
+  project_id?: string;
 }
 
 export interface ProjectCreateInput {

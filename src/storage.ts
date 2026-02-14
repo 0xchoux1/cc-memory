@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS memories (
   agent_id TEXT,
   content TEXT NOT NULL,
   tags TEXT,
+  created_by TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -42,6 +43,25 @@ export class Storage {
     this.db.pragma("journal_mode = WAL");
     this.db.pragma("foreign_keys = ON");
     this.db.exec(SCHEMA);
+    // Add created_by column if missing (migration)
+    this.migrateCreatedBy();
+    // Ensure default project exists
+    this.ensureDefaultProject();
+  }
+
+  private migrateCreatedBy(): void {
+    const cols = this.db.prepare("PRAGMA table_info(memories)").all() as { name: string }[];
+    if (!cols.some((c) => c.name === "created_by")) {
+      this.db.exec("ALTER TABLE memories ADD COLUMN created_by TEXT");
+    }
+  }
+
+  private ensureDefaultProject(): void {
+    const existing = this.db.prepare("SELECT id FROM projects WHERE id = ?").get("default");
+    if (!existing) {
+      const now = new Date().toISOString();
+      this.db.prepare("INSERT INTO projects (id, description, created_at) VALUES (?, ?, ?)").run("default", "Default project", now);
+    }
   }
 
   // Projects
@@ -90,17 +110,18 @@ export class Storage {
     scope: Scope,
     agentId: string | null,
     content: string,
-    tags: string[] | null
+    tags: string[] | null,
+    createdBy: string | null = null
   ): Memory {
     const id = randomUUID();
     const now = new Date().toISOString();
     const tagsJson = tags ? JSON.stringify(tags) : null;
     this.db
       .prepare(
-        "INSERT INTO memories (id, project_id, scope, agent_id, content, tags, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+        "INSERT INTO memories (id, project_id, scope, agent_id, content, tags, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
       )
-      .run(id, projectId, scope, agentId, content, tagsJson, now, now);
-    return { id, project_id: projectId, scope, agent_id: agentId, content, tags, created_at: now, updated_at: now };
+      .run(id, projectId, scope, agentId, content, tagsJson, createdBy, now, now);
+    return { id, project_id: projectId, scope, agent_id: agentId, content, tags, created_by: createdBy, created_at: now, updated_at: now };
   }
 
   listMemories(scope: Scope, projectId?: string, agentId?: string): Memory[] {
@@ -127,6 +148,9 @@ export class Storage {
     agentId?: string,
     limit: number = 10
   ): Memory[] {
+    const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+    if (terms.length === 0) return [];
+
     let sql = "SELECT * FROM memories WHERE 1=1";
     const params: unknown[] = [];
 
@@ -143,10 +167,18 @@ export class Storage {
       params.push(agentId);
     }
 
+    // SQL LIKE filter: at least one term must match
+    const likeClauses = terms.map(() => "(content LIKE ? OR tags LIKE ?)");
+    sql += " AND (" + likeClauses.join(" OR ") + ")";
+    for (const term of terms) {
+      const pattern = `%${term}%`;
+      params.push(pattern, pattern);
+    }
+
     sql += " ORDER BY created_at DESC";
     const rows = (this.db.prepare(sql).all(...params) as RawMemory[]).map(parseMemoryRow);
 
-    // Simple text search: score by keyword match
+    // Score and rank in memory
     return searchAndRank(rows, query, limit);
   }
 
@@ -173,6 +205,7 @@ interface RawMemory {
   agent_id: string | null;
   content: string;
   tags: string | null;
+  created_by: string | null;
   created_at: string;
   updated_at: string;
 }
