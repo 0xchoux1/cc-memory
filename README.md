@@ -1,209 +1,253 @@
 # cc-memory
 
-**Claude Code に「記憶」を与える MCP サーバー**
+> マルチエージェント開発で、共有知識と専門知識を分離管理するメモリサーバー
 
 [![MIT License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D18.0.0-green.svg)](https://nodejs.org/)
 [![MCP](https://img.shields.io/badge/MCP-Compatible-purple.svg)](https://modelcontextprotocol.io/)
 
-![cc-memory demo](./demo/cc-memory-demo.gif)
+---
+
+## コンセプト
+
+```
+Shared Scope（共有層）← 全エージェント読める、manager のみ書ける
+  ├── プロジェクト要件
+  ├── コーディング規約
+  └── 運用ルール
+
+Personal Scope（個人層）← 本人のみ読み書き
+  ├── Web AG: Nginx経験、フロント知識
+  ├── DB AG: MySQL経験、クエリ最適化
+  └── Infra AG: k8s経験、監視設定
+```
+
+マネージャーがチーム全体の知識を **Shared Scope** に集約し、各ワーカーは自分だけの経験を **Personal Scope** に蓄積。これにより、知識の一貫性と専門性を両立します。
 
 ---
 
-## 概要
+## 特徴
 
-cc-memory は、Claude Code（Anthropic の AI コーディングアシスタント）に**長期記憶**を与えるツールです。
-
-### 何ができるか
-
-- **前回の会話を覚えている** - セッションをまたいで、あなたの好みやプロジェクトの情報を記憶
-- **過去の経験から学ぶ** - 成功したこと、失敗したこと、学んだことを蓄積
-- **知識を整理する** - プロジェクトのルール、手順、パターンを体系的に管理
-
-### 誰のためか
-
-- **プログラマー**: 日々のコーディング作業を Claude Code と一緒に行う方
-- **チーム**: 複数の Claude インスタンス間で知識を共有したい方
-- **誰でも**: 専門知識がなくても、コマンド一つでセットアップできます
-
-### 特徴
-
-| 機能 | 説明 |
-|------|------|
-| **3層メモリ** | 短期・経験・知識の3つの記憶層で情報を管理 |
-| **OODA ループ** | 観察→状況判断→計画→実行の自律開発サイクル |
-| **Tachikoma 同期** | 複数の Claude インスタンス間で記憶を共有 |
-| **DIKW ピラミッド** | 経験をパターン→洞察→知恵へと昇華 |
+- **スコープモデル** — `shared`（共有）と `personal`（個人）の 2 層でメモリを管理
+- **Role-based Access Control** — `manager` は全スコープ読み書き可、`worker` は shared 読み取り＋自分の personal のみ
+- **MCP 対応** — Claude Code やその他 MCP クライアントからそのまま使える
+- **SQLite** — ローカル保存、クラウド不要、プライバシー重視
+- **8 API endpoints** — シンプルで必要十分な API セット
 
 ---
 
-## インストール
-
-### 必要なもの
-
-- Node.js 18.0.0 以上
-- Claude Code（または MCP 対応クライアント）
-
-### セットアップ
+## インストール & セットアップ
 
 ```bash
 # グローバルインストール
 npm install -g cc-memory
 
-# セットアップウィザードを実行
+# データベース初期化
 cc-memory setup
 ```
 
-これだけで完了です。Claude Code が自動的に cc-memory を認識し、記憶機能を使い始めます。
+### Claude Code で使う
+
+`~/.claude/settings.json` に以下を追加:
+
+```json
+{
+  "mcpServers": {
+    "cc-memory": {
+      "command": "cc-memory",
+      "args": ["serve"]
+    }
+  }
+}
+```
+
+> `cc-memory setup` を実行すると DB ファイルが作成されます。デフォルトパスは `./cc-memory.db`（環境変数 `CC_MEMORY_DB` で変更可）。
 
 ---
 
-## クイックスタート
+## MCP API 一覧
 
-初めての方は、対話型チュートリアルで学ぶのがおすすめです。
+### メモリ操作（4 本）
 
-```bash
-cc-memory tutorial
-```
+| ツール | 説明 |
+|--------|------|
+| `memory_store` | メモリを保存。shared スコープは manager のみ書き込み可 |
+| `memory_recall` | クエリでメモリを検索。関連度順にランキング |
+| `memory_list` | スコープ内の全メモリを一覧 |
+| `memory_delete` | メモリを削除。オーナーまたは manager のみ |
 
-<!-- TODO: チュートリアルのスクリーンショットを追加
-![Tutorial Screenshot](./docs/assets/tutorial.png)
--->
+### プロジェクト管理（2 本）
 
-チュートリアルでは、以下のことが体験できます:
+| ツール | 説明 |
+|--------|------|
+| `project_create` | 新しいプロジェクトを作成 |
+| `project_list` | 全プロジェクトを一覧 |
 
-1. 記憶の保存と検索
-2. 3層メモリの使い分け
-3. OODA ループの実践
+### エージェント管理（2 本）
+
+| ツール | 説明 |
+|--------|------|
+| `agent_register` | エージェントをプロジェクトに登録（role: manager / worker） |
+| `agent_list` | プロジェクト内の全エージェントを一覧 |
+
+### パラメータ詳細
+
+<details>
+<summary><code>memory_store</code></summary>
+
+| パラメータ | 型 | 必須 | 説明 |
+|-----------|------|------|------|
+| `scope` | `"shared" \| "personal"` | ✅ | メモリスコープ |
+| `agent_id` | `string` | ✅ | 呼び出し元エージェント ID |
+| `content` | `string` | ✅ | メモリ内容 |
+| `tags` | `string[]` | - | タグ（検索用） |
+| `project_id` | `string` | - | プロジェクト ID（デフォルト: `"default"`） |
+
+</details>
+
+<details>
+<summary><code>memory_recall</code></summary>
+
+| パラメータ | 型 | 必須 | 説明 |
+|-----------|------|------|------|
+| `scope` | `"shared" \| "personal" \| "all"` | ✅ | 検索スコープ |
+| `query` | `string` | ✅ | 検索クエリ |
+| `caller_id` | `string` | ✅* | 呼び出し元エージェント ID（権限チェック用） |
+| `agent_id` | `string` | - | エージェント ID フィルタ |
+| `project_id` | `string` | - | プロジェクト ID |
+| `limit` | `number` | - | 最大件数（1-100、デフォルト: 10） |
+
+> *`caller_id` は権限チェックのため実質必須です。
+
+</details>
+
+<details>
+<summary><code>memory_list</code></summary>
+
+| パラメータ | 型 | 必須 | 説明 |
+|-----------|------|------|------|
+| `scope` | `"shared" \| "personal"` | ✅ | メモリスコープ |
+| `agent_id` | `string` | - | エージェント ID フィルタ |
+| `project_id` | `string` | - | プロジェクト ID |
+
+</details>
+
+<details>
+<summary><code>memory_delete</code></summary>
+
+| パラメータ | 型 | 必須 | 説明 |
+|-----------|------|------|------|
+| `memory_id` | `string` | ✅ | 削除するメモリの ID |
+| `caller_id` | `string` | ✅* | 呼び出し元エージェント ID |
+| `project_id` | `string` | - | プロジェクト ID |
+
+</details>
+
+<details>
+<summary><code>project_create</code></summary>
+
+| パラメータ | 型 | 必須 | 説明 |
+|-----------|------|------|------|
+| `project_id` | `string` | ✅ | プロジェクト ID |
+| `description` | `string` | ✅ | プロジェクトの説明 |
+
+</details>
+
+<details>
+<summary><code>project_list</code></summary>
+
+パラメータなし。
+
+</details>
+
+<details>
+<summary><code>agent_register</code></summary>
+
+| パラメータ | 型 | 必須 | 説明 |
+|-----------|------|------|------|
+| `project_id` | `string` | ✅ | プロジェクト ID |
+| `agent_id` | `string` | ✅ | エージェント ID |
+| `role` | `"manager" \| "worker"` | ✅ | 役割 |
+
+</details>
+
+<details>
+<summary><code>agent_list</code></summary>
+
+| パラメータ | 型 | 必須 | 説明 |
+|-----------|------|------|------|
+| `project_id` | `string` | ✅ | プロジェクト ID |
+
+</details>
 
 ---
 
-## OODA コマンド
+## 使い方（マルチエージェントシナリオ）
 
-Claude Code 内で使える特別なコマンド（スラッシュコマンド）です。
+### 1. プロジェクト作成
 
-| コマンド | 説明 | 使用例 |
-|---------|------|--------|
-| `/observe` | 現状把握 - 現在の状況を確認し、関連する記憶を呼び出す | 「今のプロジェクトの状態は?」 |
-| `/assess` | 状況判断 - 問題点を分析し、過去の経験と照らし合わせる | 「このエラーは前に見たことがある?」 |
-| `/plan` | 計画立案 - 次のアクションを決定し、手順を整理する | 「この機能を実装する手順は?」 |
-| `/execute` | 実行 - 計画を実行し、結果を記録する | 「計画通りに進めて」 |
-| `/escalate` | 問題報告 - 問題が発生した場合、人間に判断を仰ぐ | 「この問題は人間の判断が必要」 |
-
-### OODA ループとは?
-
-OODA ループは、意思決定のフレームワークです:
-
-```
-Observe（観察）→ Orient（状況判断）→ Decide（決定）→ Act（実行）
-    ↑                                                    ↓
-    ←←←←←←←←←←← フィードバック ←←←←←←←←←←←←
+```json
+{ "tool": "project_create", "project_id": "my-app", "description": "ECサイト開発" }
 ```
 
-Claude Code がこのサイクルを回しながら、自律的に開発を進めます。
+### 2. エージェント登録
+
+```json
+{ "tool": "agent_register", "project_id": "my-app", "agent_id": "lead", "role": "manager" }
+{ "tool": "agent_register", "project_id": "my-app", "agent_id": "web-worker", "role": "worker" }
+{ "tool": "agent_register", "project_id": "my-app", "agent_id": "db-worker", "role": "worker" }
+```
+
+### 3. マネージャーが共有知識を保存
+
+```json
+{
+  "tool": "memory_store",
+  "scope": "shared",
+  "agent_id": "lead",
+  "content": "TypeScript + Next.js で開発。ESLint strict モード必須。",
+  "tags": ["規約", "tech-stack"],
+  "project_id": "my-app"
+}
+```
+
+### 4. ワーカーが共有知識を参照 & 個人メモリに記録
+
+```json
+// 共有知識を検索
+{ "tool": "memory_recall", "scope": "shared", "query": "tech-stack", "caller_id": "web-worker", "project_id": "my-app" }
+
+// 個人メモリに作業記録を保存
+{
+  "tool": "memory_store",
+  "scope": "personal",
+  "agent_id": "web-worker",
+  "content": "Nginx リバースプロキシ設定完了。ポート 3000 → 80 に転送。",
+  "tags": ["nginx", "infra"],
+  "project_id": "my-app"
+}
+```
+
+---
+
+## スコープと権限
+
+| 操作 | Shared Scope | Personal Scope（自分） | Personal Scope（他人） |
+|------|:---:|:---:|:---:|
+| **Manager 読み取り** | ✅ | ✅ | ✅ |
+| **Manager 書き込み** | ✅ | ✅ | ❌ |
+| **Worker 読み取り** | ✅ | ✅ | ❌ |
+| **Worker 書き込み** | ❌ | ✅ | ❌ |
+| **削除** | Manager のみ | オーナー or Manager | Manager のみ |
 
 ---
 
 ## CLI コマンド
 
-コマンドラインから cc-memory を操作できます。
-
 ```bash
-# セットアップ（Claude Code の設定を自動更新）
-cc-memory setup
-
-# 動作確認（問題がないかチェック）
-cc-memory doctor
-
-# 現在の状態を確認
-cc-memory status
-
-# 最新版にアップデート
-cc-memory update
-
-# 対話型チュートリアル
-cc-memory tutorial
-```
-
-### チーム向けコマンド
-
-複数人で cc-memory を使う場合:
-
-```bash
-# チームを作成
-cc-memory-cli team create --team-id my-team --description "開発チーム"
-
-# エージェント（メンバー）を追加
-cc-memory-cli agent add --team-id my-team --client-id worker-001 --level worker
-
-# チームメンバーを確認
-cc-memory-cli agent list --team-id my-team
-```
-
----
-
-## 3層メモリの説明
-
-cc-memory は、人間の記憶システムにヒントを得た3層構造を採用しています。
-
-### Working Memory（作業記憶）
-
-**今やっていることを覚えている短期記憶**
-
-- 現在のタスクの状態
-- 一時的な判断や決定
-- セッション中のメモ
-
-```
-例: 「今は認証機能を実装中」「このファイルを編集した」
-```
-
-自動的に期限が設定され、不要になると消えます。
-
-### Episodic Memory（エピソード記憶）
-
-**経験を覚えている長期記憶**
-
-- 成功した実装の記録
-- エラーとその解決方法
-- 重要なマイルストーン
-
-```
-例: 「2週間前にこのバグを修正した方法」「デプロイが成功した時の手順」
-```
-
-過去の経験から学び、同じ問題に効率的に対処できます。
-
-### Semantic Memory（意味記憶）
-
-**知識を整理した長期記憶**
-
-- プロジェクトのルール
-- コーディング規約
-- あなたの好み・設定
-
-```
-例: 「このプロジェクトは TypeScript を使う」「インデントは2スペース」
-```
-
-一度覚えた知識は、いつでも参照できます。
-
-### 3層メモリの関係
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                   Working Memory                         │
-│                  （短期・一時的）                          │
-│                        ↓                                 │
-│    ┌────────────────────────────────────────────┐       │
-│    │  重要なことは長期記憶に「固定化」される        │       │
-│    └────────────────────────────────────────────┘       │
-│                   ↓            ↓                        │
-│    ┌──────────────┐    ┌──────────────┐                 │
-│    │   Episodic   │    │   Semantic   │                 │
-│    │  （経験）     │    │  （知識）     │                 │
-│    └──────────────┘    └──────────────┘                 │
-└─────────────────────────────────────────────────────────┘
+cc-memory setup    # DB 初期化
+cc-memory doctor   # 環境チェック
+cc-memory status   # プロジェクト・メモリの統計表示
 ```
 
 ---
@@ -212,15 +256,11 @@ cc-memory は、人間の記憶システムにヒントを得た3層構造を採
 
 ### 環境変数
 
-| 変数 | デフォルト値 | 説明 |
-|------|-------------|------|
-| `MEMORY_DATA_PATH` | `~/.claude-memory` | データの保存場所 |
-| `CC_MEMORY_TACHIKOMA_NAME` | - | Tachikoma インスタンス名 |
-| `CC_MEMORY_SYNC_DIR` | - | 同期ファイルの保存場所 |
+| 変数 | デフォルト | 説明 |
+|------|-----------|------|
+| `CC_MEMORY_DB` | `cc-memory.db` | SQLite データベースのパス |
 
 ### Claude Code 設定
-
-`~/.claude/settings.json` に自動追加されます:
 
 ```json
 {
@@ -235,25 +275,37 @@ cc-memory は、人間の記憶システムにヒントを得た3層構造を採
 
 ---
 
-## よくある質問
+## FAQ
 
-### Q: データはどこに保存されますか?
+**Q: データはどこに保存されますか？**
+A: ローカルの SQLite ファイル（デフォルト: `./cc-memory.db`）。クラウドには送信されません。
 
-A: デフォルトでは `~/.claude-memory` フォルダに SQLite データベースとして保存されます。クラウドには送信されません。
+**Q: メモリを全削除するには？**
+A: DB ファイルを削除して `cc-memory setup` を再実行してください。
 
-### Q: 記憶を削除したい場合は?
+**Q: Claude Code 以外でも使えますか？**
+A: はい。MCP プロトコルに対応した任意のクライアントから利用できます。
 
-A: `~/.claude-memory` フォルダを削除すると、すべての記憶がリセットされます。
-
-### Q: 複数の PC で同じ記憶を使いたい
-
-A: Tachikoma 同期機能を使って、記憶をエクスポート/インポートできます。
+**Q: プロジェクトを指定しないとどうなりますか？**
+A: `"default"` プロジェクトが自動的に使用されます（初回起動時に作成済み）。
 
 ---
 
-## ライセンス
+## v1 からの移行
 
-MIT License - 自由に使用、改変、再配布できます。
+v1 のコードは [`v1` ブランチ](https://github.com/0xchoux1/cc-memory/tree/v1)で保全されています。
+
+### 主な変更点
+
+| | v1 | v2 |
+|---|---|---|
+| **メモリモデル** | 3 層（Working / Episodic / Semantic） | 2 スコープ（Shared / Personal） |
+| **アクセス制御** | チーム・API キーベース | Role-based（manager / worker） |
+| **API 数** | 20+ ツール | 8 ツール |
+| **同期** | Tachikoma / Git / Cloud | なし（ローカル完結） |
+| **設計思想** | 機能豊富 | シンプル・必要十分 |
+
+> ⚠️ v1 と v2 のデータベースには互換性がありません。v2 は新しい DB で始めてください。
 
 ---
 
@@ -261,72 +313,57 @@ MIT License - 自由に使用、改変、再配布できます。
 
 ### What is cc-memory?
 
-cc-memory is an MCP server that gives Claude Code **persistent memory**. It remembers your preferences, learns from past experiences, and organizes knowledge across sessions.
+A memory server for multi-agent development that separates **shared knowledge** from **personal expertise** using scope-based access control.
 
-**Key Features:**
-- **3-Layer Memory**: Working (short-term), Episodic (experiences), and Semantic (knowledge) memory
-- **OODA Loop**: Autonomous development cycle with observe, assess, plan, and execute commands
-- **Tachikoma Sync**: Share memories between multiple Claude instances
-- **DIKW Hierarchy**: Transform experiences into patterns, insights, and wisdom
+### Key Features
+
+- **Scope model** — `shared` (team-wide, manager-writable) and `personal` (agent-private)
+- **Role-based access** — `manager` reads/writes all; `worker` reads shared + own personal only
+- **MCP compatible** — works with Claude Code and any MCP client
+- **SQLite** — local storage, no cloud, privacy-first
+- **8 API endpoints** — simple and sufficient
 
 ### Quick Start
 
 ```bash
-# Install globally
 npm install -g cc-memory
-
-# Run setup wizard
 cc-memory setup
-
-# Start tutorial
-cc-memory tutorial
 ```
 
-### Commands
+Add to `~/.claude/settings.json`:
 
-| Command | Description |
-|---------|-------------|
-| `cc-memory setup` | Configure Claude Code integration |
-| `cc-memory doctor` | Check for issues |
-| `cc-memory status` | Show current state |
-| `cc-memory tutorial` | Interactive learning |
+```json
+{
+  "mcpServers": {
+    "cc-memory": {
+      "command": "cc-memory",
+      "args": ["serve"]
+    }
+  }
+}
+```
 
-### OODA Slash Commands
+### API
 
-Use these in Claude Code:
+**Memory:** `memory_store`, `memory_recall`, `memory_list`, `memory_delete`
+**Projects:** `project_create`, `project_list`
+**Agents:** `agent_register`, `agent_list`
 
-| Command | Description |
-|---------|-------------|
-| `/observe` | Assess current situation |
-| `/assess` | Analyze problems with past experience |
-| `/plan` | Create action plan |
-| `/execute` | Execute plan and record results |
-| `/escalate` | Request human decision |
+### Scope & Permissions
 
-### Memory Layers
+| Action | Shared | Own Personal | Other's Personal |
+|--------|:---:|:---:|:---:|
+| Manager read | ✅ | ✅ | ✅ |
+| Manager write | ✅ | ✅ | ❌ |
+| Worker read | ✅ | ✅ | ❌ |
+| Worker write | ❌ | ✅ | ❌ |
 
-1. **Working Memory**: Current task state, temporary decisions
-2. **Episodic Memory**: Success stories, error resolutions, milestones
-3. **Semantic Memory**: Project rules, preferences, patterns
+### Migration from v1
 
-### Configuration
-
-Environment variables:
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `MEMORY_DATA_PATH` | `~/.claude-memory` | Data storage location |
-| `CC_MEMORY_TACHIKOMA_NAME` | - | Tachikoma instance name |
-| `CC_MEMORY_SYNC_DIR` | - | Sync file directory |
-
-### License
-
-MIT License
+v1 is preserved on the [`v1` branch](https://github.com/0xchoux1/cc-memory/tree/v1). v2 databases are not compatible with v1 — start fresh.
 
 ---
 
-## Links
+## License
 
-- [GitHub Repository](https://github.com/0xchoux1/cc-memory)
-- [MCP Documentation](https://modelcontextprotocol.io/)
-- [Claude Code](https://claude.ai/code)
+MIT
