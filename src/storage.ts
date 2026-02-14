@@ -188,6 +188,15 @@ export class Storage {
     return row ? parseMemoryRow(row) : undefined;
   }
 
+  updateMemory(id: string, content: string, updatedBy: string): Memory | null {
+    const now = new Date().toISOString();
+    const result = this.db
+      .prepare("UPDATE memories SET content = ?, updated_at = ? WHERE id = ?")
+      .run(content, now, id);
+    if (result.changes === 0) return null;
+    return this.getMemory(id) ?? null;
+  }
+
   deleteMemory(id: string): boolean {
     const result = this.db.prepare("DELETE FROM memories WHERE id = ?").run(id);
     return result.changes > 0;

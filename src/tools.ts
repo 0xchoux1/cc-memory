@@ -27,6 +27,12 @@ export const schemas = {
     agent_id: z.string().optional(),
     project_id: z.string().optional(),
   }),
+  memory_update: z.object({
+    memory_id: z.string(),
+    content: z.string(),
+    caller_id: z.string(),
+    project_id: z.string().optional(),
+  }),
   memory_delete: z.object({
     memory_id: z.string(),
     caller_id: z.string().optional(),
@@ -92,6 +98,20 @@ export const toolDefinitions = [
         project_id: { type: "string", description: "Project ID" },
       },
       required: ["scope"],
+    },
+  },
+  {
+    name: "memory_update",
+    description: "Update the content of an existing memory. Only the owner or a manager can update.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        memory_id: { type: "string", description: "Memory ID to update" },
+        content: { type: "string", description: "New content for the memory" },
+        caller_id: { type: "string", description: "Caller agent ID for permission checks" },
+        project_id: { type: "string", description: "Project ID" },
+      },
+      required: ["memory_id", "content", "caller_id"],
     },
   },
   {
@@ -207,6 +227,25 @@ export function createToolHandler(storage: Storage) {
           const input = schemas.memory_list.parse(args);
           const memories = storage.listMemories(input.scope, input.project_id, input.agent_id);
           return JSON.stringify({ ok: true, count: memories.length, memories });
+        }
+
+        case "memory_update": {
+          const input = schemas.memory_update.parse(args);
+          const projectId = input.project_id ?? DEFAULT_PROJECT;
+          const memory = storage.getMemory(input.memory_id);
+          if (!memory) {
+            return JSON.stringify({ ok: false, error: "Memory not found" });
+          }
+          const role = getAgentRole(storage, projectId, input.caller_id);
+          if (!role) {
+            throw new AuthError(`Agent "${input.caller_id}" is not registered in project "${projectId}"`);
+          }
+          const isOwner = memory.agent_id === input.caller_id || memory.created_by === input.caller_id;
+          if (!isOwner && role !== "manager") {
+            throw new AuthError("Only the memory owner or a manager can update memories");
+          }
+          const updated = storage.updateMemory(input.memory_id, input.content, input.caller_id);
+          return JSON.stringify({ ok: true, memory: updated });
         }
 
         case "memory_delete": {
