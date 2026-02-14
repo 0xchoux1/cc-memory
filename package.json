@@ -1,57 +1,32 @@
 {
   "name": "cc-memory",
-  "version": "1.0.0",
-  "description": "Hierarchical memory system for Claude Code - MCP Server",
-  "main": "dist/index.js",
+  "version": "2.0.0",
+  "description": "Multi-agent memory server with scope-based access control - MCP Server",
+  "main": "dist/server.js",
   "bin": {
-    "cc-memory": "dist/cli/index.js",
-    "cc-memory-cli": "dist/cli.js",
-    "cc-memory-tutorial": "dist/cli/tutorial.js"
+    "cc-memory": "dist/cli.js"
   },
-  "files": [
-    "dist",
-    "templates"
-  ],
+  "files": ["dist"],
   "type": "module",
   "scripts": {
     "build": "tsc",
-    "start": "node dist/index.js",
-    "start:http": "node dist/http-server.js",
+    "start": "node dist/server.js",
     "dev": "tsc --watch",
     "test": "vitest run",
     "test:watch": "vitest",
-    "clean": "rm -rf dist",
-    "tutorial": "npx tsx src/cli/tutorial.ts"
+    "clean": "rm -rf dist"
   },
-  "keywords": [
-    "mcp",
-    "claude",
-    "memory",
-    "ai",
-    "llm"
-  ],
+  "keywords": ["mcp", "claude", "memory", "ai", "multi-agent"],
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.71.2",
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "express": "^5.2.1",
-    "express-rate-limit": "^8.2.1",
-    "helmet": "^8.1.0",
-    "simple-git": "^3.30.0",
-    "sql.js": "^1.11.0",
-    "uuid": "^10.0.0",
-    "ws": "^8.19.0",
+    "better-sqlite3": "^11.0.0",
     "zod": "^3.23.0"
   },
   "devDependencies": {
-    "@types/express": "^5.0.6",
+    "@types/better-sqlite3": "^7.6.0",
     "@types/node": "^22.0.0",
-    "@types/sql.js": "^1.4.9",
-    "@types/supertest": "^6.0.3",
-    "@types/uuid": "^10.0.0",
-    "@types/ws": "^8.18.1",
-    "supertest": "^7.2.2",
     "typescript": "^5.5.0",
     "vitest": "^2.0.0"
   },
