@@ -168,10 +168,11 @@ export class Storage {
     }
 
     // SQL LIKE filter: at least one term must match
-    const likeClauses = terms.map(() => "(content LIKE ? OR tags LIKE ?)");
+    const likeClauses = terms.map(() => "(content LIKE ? ESCAPE '\\' OR tags LIKE ? ESCAPE '\\')");
     sql += " AND (" + likeClauses.join(" OR ") + ")";
     for (const term of terms) {
-      const pattern = `%${term}%`;
+      const escaped = term.replace(/%/g, "\\%").replace(/_/g, "\\_");
+      const pattern = `%${escaped}%`;
       params.push(pattern, pattern);
     }
 

@@ -169,8 +169,11 @@ export function createToolHandler(storage: Storage) {
           const projectId = input.project_id ?? DEFAULT_PROJECT;
           const callerId = input.caller_id;
 
-          // Auth check if caller_id is provided
-          if (callerId) {
+          // Auth check - caller_id required for access control
+          if (!callerId) {
+            throw new AuthError("caller_id is required for memory_recall");
+          }
+          {
             if (input.scope === "personal") {
               checkReadPermission(storage, projectId, callerId, "personal", input.agent_id);
             } else if (input.scope === "all") {
@@ -209,8 +212,11 @@ export function createToolHandler(storage: Storage) {
         case "memory_delete": {
           const input = schemas.memory_delete.parse(args);
 
-          // Auth check if caller_id is provided
-          if (input.caller_id) {
+          // Auth check - caller_id required for access control
+          if (!input.caller_id) {
+            throw new AuthError("caller_id is required for memory_delete");
+          }
+          {
             const projectId = input.project_id ?? DEFAULT_PROJECT;
             const memory = storage.getMemory(input.memory_id);
             if (memory) {

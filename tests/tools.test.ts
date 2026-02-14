@@ -58,7 +58,7 @@ describe("Tool Handler", () => {
     expect(stored.memory.created_by).toBe("mgr");
 
     const recalled = await parse("memory_recall", {
-      scope: "shared", query: "design", project_id: "p1",
+      scope: "shared", query: "design", caller_id: "mgr", project_id: "p1",
     });
     expect(recalled.count).toBe(1);
   });
@@ -82,7 +82,7 @@ describe("Tool Handler", () => {
       scope: "shared", agent_id: "mgr", content: "temp", project_id: "p1",
     });
 
-    const del = await parse("memory_delete", { memory_id: stored.memory.id });
+    const del = await parse("memory_delete", { memory_id: stored.memory.id, caller_id: "mgr", project_id: "p1" });
     expect(del.ok).toBe(true);
   });
 
