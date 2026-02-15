@@ -1,6 +1,6 @@
 {
   "name": "cc-memory",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "Multi-agent memory server with scope-based access control - MCP Server",
   "main": "dist/server.js",
   "bin": {

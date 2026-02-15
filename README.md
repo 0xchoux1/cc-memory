@@ -124,11 +124,12 @@ cc-memory setup
 | `scope` | `"shared" \| "personal" \| "all"` | ✅ | 検索スコープ |
 | `query` | `string` | ✅ | 検索クエリ |
 | `caller_id` | `string` | ✅* | 呼び出し元エージェント ID（権限チェック用） |
-| `agent_id` | `string` | - | エージェント ID フィルタ |
+| `agent_id` | `string` | - | エージェント ID フィルタ（personal スコープ用） |
 | `project_id` | `string` | - | プロジェクト ID |
 | `limit` | `number` | - | 最大件数（1-100、デフォルト: 10） |
 
 > *`caller_id` は権限チェックのため実質必須です。
+> `agent_id` は personal スコープのフィルタ用です。shared スコープでは無視されます。
 
 </details>
 
@@ -138,7 +139,7 @@ cc-memory setup
 | パラメータ | 型 | 必須 | 説明 |
 |-----------|------|------|------|
 | `scope` | `"shared" \| "personal"` | ✅ | メモリスコープ |
-| `agent_id` | `string` | - | エージェント ID フィルタ |
+| `agent_id` | `string` | - | エージェント ID フィルタ（personal スコープ用。shared では無視） |
 | `project_id` | `string` | - | プロジェクト ID |
 
 </details>

@@ -213,11 +213,13 @@ export function createToolHandler(storage: Storage) {
             // shared: everyone can read - no check needed
           }
 
+          // For shared scope, ignore agent_id filter (shared memories have agent_id=NULL)
+          const agentFilter = input.scope === "shared" ? undefined : input.agent_id;
           const memories = storage.searchMemories(
             input.query,
             input.scope,
             projectId,
-            input.agent_id,
+            agentFilter,
             input.limit ?? 10
           );
           return JSON.stringify({ ok: true, count: memories.length, memories });
@@ -225,7 +227,9 @@ export function createToolHandler(storage: Storage) {
 
         case "memory_list": {
           const input = schemas.memory_list.parse(args);
-          const memories = storage.listMemories(input.scope, input.project_id, input.agent_id);
+          // For shared scope, ignore agent_id filter (shared memories have agent_id=NULL)
+          const listAgentFilter = input.scope === "shared" ? undefined : input.agent_id;
+          const memories = storage.listMemories(input.scope, input.project_id, listAgentFilter);
           return JSON.stringify({ ok: true, count: memories.length, memories });
         }
 
