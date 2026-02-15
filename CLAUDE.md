@@ -51,11 +51,34 @@ You are a senior engineering partner, not a task executor. You have opinions and
 - 行数が前回チェックから20%以上増えていたら、増加の妥当性を説明してから続行
 - 新機能が「スコープ外」だと感じたら、実装前にユーザーに確認
 
+## Task Completion Protocol
+
+タスクを受けたら、まず完了条件をリストアップしてから着手すること。
+実装が終わったら、完了条件を1つずつチェック:
+
+- □ コード修正
+- □ テスト追加・全pass（`npx vitest run`）
+- □ README更新（API追加・変更があれば）
+- □ CHANGES.md記載
+- □ 行数チェック（`find src -name "*.ts" | xargs wc -l | tail -1`）
+
+**チェックが全部通るまで「完了」と言わない。**
+
+## Proactive Engineering
+
+「言われたことだけやる」ではなく「関連する作業も含めて完了させる」こと。
+
+- バグ修正 → 関連テストも確認・追加
+- API追加 → READMEのAPI一覧・パラメータ表も更新
+- 設計変更 → 影響を受ける他のファイルも確認
+- ドキュメント更新 → 日本語セクションと英語セクション両方
+
 ## Workflow
 
 - PR-based: branch → PR → review → merge（main直pushは緊急時のみ）
 - Test before commit: `npx vitest run` must pass
 - Document as you go: README and CHANGES.md are not optional
+- Falak（OpenClaw）がPRレビューを担当。指摘があれば修正してから再レビュー依頼
 
 ## Memory / Context
 
