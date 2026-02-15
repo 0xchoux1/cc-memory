@@ -303,6 +303,55 @@ A: `"default"` プロジェクトが自動的に使用されます（初回起�
 
 ---
 
+## ベストプラクティス
+
+### tags を必ずつける
+
+tags はメモリの検索精度を決めます。cc-memory のテキスト検索は `content` と `tags` の両方を対象にするため、短いキーワードを tags に入れておくと recall のヒット率が上がります。
+
+```json
+{
+  "tool": "memory_store",
+  "scope": "shared",
+  "agent_id": "lead",
+  "content": "本番デプロイは金曜日を避ける。障害対応が週末にずれ込むリスクがある。",
+  "tags": ["deploy", "rule", "ops"],
+  "project_id": "my-app"
+}
+```
+
+### store する前に recall する
+
+同じ内容を何度も store すると、recall 時にノイズになります。store する前に recall で既存メモリを確認し、重複があれば `memory_update` で更新してください。
+
+### shared vs personal の判断基準
+
+| 迷ったら | → |
+|----------|---|
+| チーム全員が知るべき？ | → `shared` |
+| 自分の作業ログ・経験？ | → `personal` |
+| 迷う？ | → `personal` に入れて、後で manager が shared に昇格 |
+
+### いつ store するか
+
+以下のタイミングで store すると、メモリが自然に蓄積されます：
+
+- **判断・決定を下した時** — なぜその選択をしたか（例: 「PostgreSQL ではなく SQLite を選択。理由: ローカル完結を優先」）
+- **バグを直した時** — 何が壊れていて何を直したか
+- **教訓を得た時** — 次回同じ失敗をしないために
+- **タスク完了時** — 何をやって何が変わったか
+
+### メモリの粒度
+
+1 メモリ = 1 トピック。長い文章を 1 つに詰め込むより、短いメモリを複数 store する方が recall の精度が上がります。
+
+```
+❌ 「デプロイ手順を変更した。金曜は避ける。あとDBのバックアップ頻度も変えた。」
+✅ 「デプロイは金曜を避けるルールに変更」 + 「DBバックアップを日次から6時間ごとに変更」
+```
+
+---
+
 ## v1 からの移行
 
 v1 のコードは [`v1` ブランチ](https://github.com/0xchoux1/cc-memory/tree/v1)で保全されています。
@@ -369,6 +418,13 @@ Add to `~/.claude/settings.json`:
 | Manager write | ✅ | ✅ | ❌ |
 | Worker read | ✅ | ✅ | ❌ |
 | Worker write | ❌ | ✅ | ❌ |
+
+### Best Practices
+
+- **Always add tags** — improves recall accuracy since search targets both `content` and `tags`
+- **Recall before store** — avoid duplicates; use `memory_update` if a memory already exists
+- **One topic per memory** — shorter, focused memories rank better than long multi-topic ones
+- **shared vs personal** — if the whole team needs it → `shared`; if it's your own log → `personal`; when in doubt → `personal` first, promote to `shared` later
 
 ### Migration from v1
 
