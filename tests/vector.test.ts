@@ -32,7 +32,7 @@ describe("Vector Search", () => {
     expect(storage.vectorEnabled).toBe(true);
   });
 
-  it("stores and retrieves embeddings via KNN", () => {
+  it("stores embeddings and finds via hybrid search", () => {
     const m1 = storage.storeMemory("default", "shared", null, "apple banana", null, "a1");
     const m2 = storage.storeMemory("default", "shared", null, "cherry date", null, "a1");
 
@@ -42,28 +42,40 @@ describe("Vector Search", () => {
     storage.storeEmbedding(m1.id, "default", emb1);
     storage.storeEmbedding(m2.id, "default", emb2);
 
-    // Search with emb1 — should find m1 as closest
-    const results = storage.vectorSearchPublic(m1.id, "default", 5);
+    // Hybrid search with emb1 as query — should rank m1 higher
+    const results = storage.searchMemories("apple", "shared", "default", undefined, 10, emb1);
     expect(results.length).toBeGreaterThanOrEqual(1);
-    // First result should be the memory itself (distance=0)
-    expect(results[0].memory_id).toBe(m1.id);
-    expect(results[0].distance).toBeCloseTo(0, 2);
+    expect(results[0].id).toBe(m1.id);
   });
 
   it("deletes embeddings when memory is deleted", () => {
-    const m = storage.storeMemory("default", "shared", null, "temp", null, "a1");
-    storage.storeEmbedding(m.id, "default", fakeEmbedding(42));
-
-    // Verify embedding exists via public search
-    const before = storage.vectorSearchPublic(m.id, "default", 5);
-    expect(before.length).toBeGreaterThanOrEqual(1);
+    const m1 = storage.storeMemory("default", "shared", null, "fruit apple", null, "a1");
+    const m2 = storage.storeMemory("default", "shared", null, "fruit banana", null, "a1");
+    const emb = fakeEmbedding(42);
+    storage.storeEmbedding(m1.id, "default", emb);
+    storage.storeEmbedding(m2.id, "default", fakeEmbedding(43));
 
     // Delete memory (should also delete embedding)
-    storage.deleteMemory(m.id);
+    storage.deleteMemory(m1.id);
 
-    // The embedding should be gone
-    const after = storage.vectorSearchPublic(m.id, "default", 5);
-    expect(after).toHaveLength(0);
+    // Hybrid search should not find deleted memory
+    const results = storage.searchMemories("fruit", "shared", "default", undefined, 10, emb);
+    const ids = results.map((r) => r.id);
+    expect(ids).not.toContain(m1.id);
+  });
+
+  it("deletes embeddings when memory content is updated", () => {
+    const m = storage.storeMemory("default", "shared", null, "original content", null, "a1");
+    storage.storeEmbedding(m.id, "default", fakeEmbedding(1));
+
+    // Update content — old embedding should be deleted
+    storage.updateMemory(m.id, "completely new content", "a1");
+
+    // Hybrid search with old embedding should not find a vector match
+    // (keyword match may still work, but the old vector is gone)
+    const results = storage.searchMemories("original", "shared", "default", undefined, 10, fakeEmbedding(1));
+    // "original" is no longer in content, so shouldn't match
+    expect(results).toHaveLength(0);
   });
 
   it("keyword-only search still works without embeddings", () => {
@@ -80,7 +92,6 @@ describe("Vector Search", () => {
     const m2 = storage.storeMemory("default", "shared", null, "web development", ["web"], "a1");
     const m3 = storage.storeMemory("default", "shared", null, "deep learning neural nets", ["ml"], "a1");
 
-    // Give similar embeddings to m1 and m3 (both ML topics)
     const mlEmb = fakeEmbedding(10);
     const webEmb = fakeEmbedding(99);
     const mlEmb2 = fakeEmbedding(11); // close to mlEmb
@@ -93,7 +104,6 @@ describe("Vector Search", () => {
     const queryEmb = fakeEmbedding(10);
     const results = storage.searchMemories("learning", "shared", "default", undefined, 10, queryEmb);
 
-    // Should find ML-related memories (m1 and m3), not web (m2)
     expect(results.length).toBeGreaterThanOrEqual(1);
     const ids = results.map((r) => r.id);
     expect(ids).toContain(m1.id);
@@ -106,10 +116,19 @@ describe("Vector Search", () => {
     storage.storeEmbedding(m1.id, "default", fakeEmbedding(1));
     storage.storeEmbedding(m2.id, "default", fakeEmbedding(2));
 
-    // Search shared scope only
     const results = storage.searchMemories("fact", "shared", "default", undefined, 10, fakeEmbedding(1));
     const scopes = results.map((r) => r.scope);
     expect(scopes.every((s) => s === "shared")).toBe(true);
+  });
+
+  it("temporal decay does not kill recent memories", () => {
+    // Regression test: DECAY_LAMBDA should not obliterate scores for recent memories
+    const m = storage.storeMemory("default", "shared", null, "recent info", null, "a1");
+    storage.storeEmbedding(m.id, "default", fakeEmbedding(1));
+
+    const results = storage.searchMemories("recent", "shared", "default", undefined, 10, fakeEmbedding(1));
+    expect(results).toHaveLength(1);
+    expect(results[0].id).toBe(m.id);
   });
 
   it("listAllMemories returns all scopes", () => {

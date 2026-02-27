@@ -50,7 +50,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS vec_memories USING vec0(
 // Hybrid scoring weights
 const VECTOR_WEIGHT = 0.7;
 const TEXT_WEIGHT = 0.3;
-const DECAY_LAMBDA = 0.0000001; // ~0.86% per day
+const DECAY_LAMBDA = 1e-10; // ~0.86% per day (ageMs unit)
 
 export class Storage {
   private db: Database.Database;
@@ -159,26 +159,6 @@ export class Storage {
          WHERE project_id = ? AND embedding MATCH ? ORDER BY distance LIMIT ?`
       )
       .all(projectId, buf, limit) as Array<{ memory_id: string; distance: number }>;
-  }
-
-  // Public vector search for curation (KNN by memory_id)
-  vectorSearchPublic(
-    memoryId: string,
-    projectId: string,
-    limit: number
-  ): Array<{ memory_id: string; distance: number }> {
-    if (!this.vectorEnabled) return [];
-    const row = this.db
-      .prepare("SELECT embedding FROM vec_memories WHERE memory_id = ?")
-      .get(memoryId) as { embedding: Buffer } | undefined;
-    if (!row) return [];
-    const embedding = new Float32Array(
-      row.embedding.buffer.slice(
-        row.embedding.byteOffset,
-        row.embedding.byteOffset + row.embedding.byteLength
-      )
-    );
-    return this.vectorSearch(embedding, projectId, limit);
   }
 
   // Memories
@@ -362,6 +342,8 @@ export class Storage {
       .prepare("UPDATE memories SET content = ?, updated_at = ? WHERE id = ?")
       .run(content, now, id);
     if (result.changes === 0) return null;
+    // Content changed — old embedding is now stale
+    this.deleteEmbedding(id);
     return this.getMemory(id) ?? null;
   }
 
@@ -415,19 +397,8 @@ function textScore(memory: Memory, query: string): number {
 }
 
 function searchAndRank(memories: Memory[], query: string, limit: number): Memory[] {
-  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
-  if (terms.length === 0) return memories.slice(0, limit);
-
-  const scored = memories.map((m) => {
-    const text = (m.content + " " + (m.tags?.join(" ") ?? "")).toLowerCase();
-    let score = 0;
-    for (const term of terms) {
-      if (text.includes(term)) score++;
-    }
-    return { memory: m, score };
-  });
-
-  return scored
+  return memories
+    .map((m) => ({ memory: m, score: textScore(m, query) }))
     .filter((s) => s.score > 0)
     .sort((a, b) => b.score - a.score)
     .slice(0, limit)

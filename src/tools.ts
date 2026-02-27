@@ -2,9 +2,12 @@
 import { z } from "zod";
 import type { Storage } from "./storage.js";
 import { checkStorePermission, checkReadPermission, getAgentRole, AuthError } from "./auth.js";
-import { embed } from "./embeddings.js";
+import { embed, DIMENSIONS } from "./embeddings.js";
 
 const DEFAULT_PROJECT = "default";
+
+// embedding: true = auto-generate, number[] = use directly
+const embeddingSchema = z.union([z.literal(true), z.array(z.number()).length(DIMENSIONS)]).optional();
 
 // Tool schemas
 export const schemas = {
@@ -14,7 +17,7 @@ export const schemas = {
     content: z.string(),
     tags: z.array(z.string()).optional(),
     project_id: z.string().optional(),
-    embedding: z.boolean().optional(),
+    embedding: embeddingSchema,
   }),
   memory_recall: z.object({
     scope: z.enum(["shared", "personal", "all"]),
@@ -23,7 +26,7 @@ export const schemas = {
     query: z.string(),
     project_id: z.string().optional(),
     limit: z.number().int().min(1).max(100).optional(),
-    embedding: z.boolean().optional(),
+    embedding: embeddingSchema,
   }),
   memory_list: z.object({
     scope: z.enum(["shared", "personal"]),
@@ -35,7 +38,7 @@ export const schemas = {
     content: z.string(),
     caller_id: z.string(),
     project_id: z.string().optional(),
-    embedding: z.boolean().optional(),
+    embedding: embeddingSchema,
   }),
   memory_delete: z.object({
     memory_id: z.string(),
@@ -57,15 +60,21 @@ export const schemas = {
   }),
 };
 
-// Helper: resolve embedding (fire-and-forget safe)
+// Helper: resolve embedding for store/update
+// embeddingInput: true = auto-generate, number[] = use directly, undefined = skip
 async function resolveEmbedding(
   content: string,
-  wantEmbedding: boolean | undefined,
+  embeddingInput: true | number[] | undefined,
   vectorEnabled: boolean
 ): Promise<{ embedding: Float32Array | null; status: "stored" | "pending" | "skipped" }> {
-  if (!wantEmbedding || !vectorEnabled) {
+  if (!embeddingInput || !vectorEnabled) {
     return { embedding: null, status: "skipped" };
   }
+  // Direct embedding provided
+  if (Array.isArray(embeddingInput)) {
+    return { embedding: new Float32Array(embeddingInput), status: "stored" };
+  }
+  // Auto-generate
   try {
     const vec = await embed(content);
     if (vec) return { embedding: vec, status: "stored" };
@@ -73,6 +82,16 @@ async function resolveEmbedding(
   } catch {
     return { embedding: null, status: "pending" };
   }
+}
+
+// Helper: resolve query embedding for recall
+async function resolveQueryEmbedding(
+  embeddingInput: true | number[] | undefined,
+  query: string
+): Promise<Float32Array | undefined> {
+  if (!embeddingInput) return undefined;
+  if (Array.isArray(embeddingInput)) return new Float32Array(embeddingInput);
+  return (await embed(query)) ?? undefined;
 }
 
 // Tool definitions for MCP
@@ -89,7 +108,7 @@ export const toolDefinitions = [
         content: { type: "string", description: "Memory content" },
         tags: { type: "array", items: { type: "string" }, description: "Optional tags" },
         project_id: { type: "string", description: "Project ID (default: 'default')" },
-        embedding: { type: "boolean", description: "Generate and store embedding vector (default: false)" },
+        embedding: { oneOf: [{ type: "boolean", const: true }, { type: "array", items: { type: "number" } }], description: "true = auto-generate embedding, number[384] = use provided vector" },
       },
       required: ["scope", "agent_id", "content"],
     },
@@ -106,7 +125,7 @@ export const toolDefinitions = [
         query: { type: "string", description: "Search query" },
         project_id: { type: "string", description: "Project ID" },
         limit: { type: "number", description: "Max results (default: 10)" },
-        embedding: { type: "boolean", description: "Use hybrid vector+keyword search (default: false)" },
+        embedding: { oneOf: [{ type: "boolean", const: true }, { type: "array", items: { type: "number" } }], description: "true = auto-generate query embedding, number[384] = use provided vector" },
       },
       required: ["scope", "query", "caller_id"],
     },
@@ -134,7 +153,7 @@ export const toolDefinitions = [
         content: { type: "string", description: "New content for the memory" },
         caller_id: { type: "string", description: "Caller agent ID for permission checks" },
         project_id: { type: "string", description: "Project ID" },
-        embedding: { type: "boolean", description: "Re-generate embedding for updated content (default: false)" },
+        embedding: { oneOf: [{ type: "boolean", const: true }, { type: "array", items: { type: "number" } }], description: "true = auto-generate embedding, number[384] = use provided vector" },
       },
       required: ["memory_id", "content", "caller_id"],
     },
@@ -221,26 +240,25 @@ export function createToolHandler(storage: Storage) {
           const projectId = input.project_id ?? DEFAULT_PROJECT;
           const callerId = input.caller_id;
 
+          // Resolve query embedding upfront (used by all paths)
+          const queryEmbedding = await resolveQueryEmbedding(input.embedding, input.query);
+
           // Auth checks
           if (input.scope === "personal") {
             checkReadPermission(storage, projectId, callerId, "personal", input.agent_id);
           } else if (input.scope === "all") {
             const role = getAgentRole(storage, projectId, callerId);
             if (role === "worker") {
-              // Worker: search shared + own personal, merge
-              const queryEmbedding = input.embedding ? (await embed(input.query)) ?? undefined : undefined;
-              const shared = storage.searchMemories(input.query, "shared", projectId, undefined, input.limit ?? 10, queryEmbedding);
-              const personal = storage.searchMemories(input.query, "personal", projectId, callerId, input.limit ?? 10, queryEmbedding);
-              const merged = [...shared, ...personal]
-                .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
-                .slice(0, input.limit ?? 10);
-              return JSON.stringify({ ok: true, count: merged.length, memories: merged });
+              // Worker scope=all: single search then filter to shared + own personal
+              const limit = input.limit ?? 10;
+              const all = storage.searchMemories(input.query, "all", projectId, undefined, limit * 2, queryEmbedding);
+              const filtered = all
+                .filter((m) => m.scope === "shared" || m.agent_id === callerId)
+                .slice(0, limit);
+              return JSON.stringify({ ok: true, count: filtered.length, memories: filtered });
             }
             // manager can see all - fall through
           }
-
-          // Resolve query embedding if requested
-          const queryEmbedding = input.embedding ? (await embed(input.query)) ?? undefined : undefined;
 
           // For shared scope, ignore agent_id filter (shared memories have agent_id=NULL)
           const agentFilter = input.scope === "shared" ? undefined : input.agent_id;
@@ -277,16 +295,15 @@ export function createToolHandler(storage: Storage) {
           if (!isOwner && role !== "manager") {
             throw new AuthError("Only the memory owner or a manager can update memories");
           }
+          // updateMemory deletes stale embedding automatically
           const updated = storage.updateMemory(input.memory_id, input.content, input.caller_id);
 
           // Re-generate embedding if requested
-          let embeddingStatus: "stored" | "pending" | "skipped" = "skipped";
-          if (input.embedding && storage.vectorEnabled && updated) {
-            const { embedding, status } = await resolveEmbedding(input.content, true, storage.vectorEnabled);
-            if (embedding) {
-              storage.storeEmbedding(input.memory_id, projectId, embedding);
-            }
-            embeddingStatus = status;
+          const { embedding: newEmb, status: embeddingStatus } = await resolveEmbedding(
+            input.content, input.embedding, storage.vectorEnabled
+          );
+          if (newEmb) {
+            storage.storeEmbedding(input.memory_id, projectId, newEmb);
           }
 
           return JSON.stringify({ ok: true, memory: updated, embedding_status: embeddingStatus });
