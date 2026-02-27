@@ -79,7 +79,7 @@ cc-memory setup
 
 ## MCP API 一覧
 
-### メモリ操作（4 本）
+### メモリ操作（6 本）
 
 | ツール | 説明 |
 |--------|------|
@@ -88,6 +88,7 @@ cc-memory setup
 | `memory_list` | スコープ内の全メモリを一覧 |
 | `memory_update` | メモリ内容を更新。オーナーまたは manager のみ。`embedding: true` で再ベクトル化 |
 | `memory_delete` | メモリを削除。オーナーまたは manager のみ |
+| `memory_curate` | 重複・古いメモリを検出・削除。`dry_run: true`（デフォルト）でレポートのみ |
 
 ### プロジェクト管理（2 本）
 
@@ -415,7 +416,7 @@ Add to `~/.claude/settings.json`:
 
 ### API
 
-**Memory:** `memory_store`, `memory_recall`, `memory_list`, `memory_delete`
+**Memory:** `memory_store`, `memory_recall`, `memory_list`, `memory_update`, `memory_delete`, `memory_curate`
 **Projects:** `project_create`, `project_list`
 **Agents:** `agent_register`, `agent_list`
 

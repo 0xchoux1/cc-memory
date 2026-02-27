@@ -161,6 +161,26 @@ export class Storage {
       .all(projectId, buf, limit) as Array<{ memory_id: string; distance: number }>;
   }
 
+  // Public vector search for curation (KNN by memory_id)
+  vectorSearchPublic(
+    memoryId: string,
+    projectId: string,
+    limit: number
+  ): Array<{ memory_id: string; distance: number }> {
+    if (!this.vectorEnabled) return [];
+    const row = this.db
+      .prepare("SELECT embedding FROM vec_memories WHERE memory_id = ?")
+      .get(memoryId) as { embedding: Buffer } | undefined;
+    if (!row) return [];
+    const embedding = new Float32Array(
+      row.embedding.buffer.slice(
+        row.embedding.byteOffset,
+        row.embedding.byteOffset + row.embedding.byteLength
+      )
+    );
+    return this.vectorSearch(embedding, projectId, limit);
+  }
+
   // Memories
   storeMemory(
     projectId: string,
