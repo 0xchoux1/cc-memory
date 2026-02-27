@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { Storage } from "./storage.js";
 import { checkStorePermission, checkReadPermission, getAgentRole, AuthError } from "./auth.js";
 import { embed, DIMENSIONS } from "./embeddings.js";
+import { analyzeMemories, executeCuration } from "./curate.js";
 
 const DEFAULT_PROJECT = "default";
 
@@ -57,6 +58,13 @@ export const schemas = {
   }),
   agent_list: z.object({
     project_id: z.string(),
+  }),
+  memory_curate: z.object({
+    caller_id: z.string(),
+    project_id: z.string().optional(),
+    scope: z.enum(["shared", "personal"]).optional(),
+    threshold: z.number().min(0).max(1).optional(),
+    dry_run: z.boolean().optional(),
   }),
 };
 
@@ -212,6 +220,21 @@ export const toolDefinitions = [
       required: ["project_id"],
     },
   },
+  {
+    name: "memory_curate",
+    description: "Analyze and clean up duplicate/stale memories. Manager only for shared scope. Workers can curate their own personal memories.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        caller_id: { type: "string", description: "Caller agent ID (for RBAC)" },
+        project_id: { type: "string", description: "Project ID (default: 'default')" },
+        scope: { type: "string", enum: ["shared", "personal"], description: "Scope to curate (default: all accessible)" },
+        threshold: { type: "number", description: "Similarity threshold 0-1 (default: 0.85)" },
+        dry_run: { type: "boolean", description: "If true, report only without deleting (default: true)" },
+      },
+      required: ["caller_id"],
+    },
+  },
 ];
 
 // Handler
@@ -360,6 +383,65 @@ export function createToolHandler(storage: Storage) {
           const input = schemas.agent_list.parse(args);
           const agents = storage.listAgents(input.project_id);
           return JSON.stringify({ ok: true, count: agents.length, agents });
+        }
+
+        case "memory_curate": {
+          const input = schemas.memory_curate.parse(args);
+          const projectId = input.project_id ?? DEFAULT_PROJECT;
+          const role = getAgentRole(storage, projectId, input.caller_id);
+          if (!role) {
+            throw new AuthError(`Agent "${input.caller_id}" is not registered in project "${projectId}"`);
+          }
+
+          if (!storage.vectorEnabled) {
+            return JSON.stringify({ ok: false, error: "Vector search not available — sqlite-vec required for curation" });
+          }
+
+          // Determine which memories to curate based on role and scope
+          let memories: import("./types.js").Memory[];
+          if (input.scope === "shared") {
+            if (role !== "manager") {
+              throw new AuthError("Only managers can curate shared memories");
+            }
+            memories = storage.listMemories("shared", projectId);
+          } else if (input.scope === "personal") {
+            // Workers can only curate their own personal
+            const agentId = role === "manager" ? undefined : input.caller_id;
+            memories = storage.listMemories("personal", projectId, agentId);
+          } else {
+            // No scope specified: manager gets all, worker gets shared + own personal
+            if (role === "manager") {
+              memories = storage.listAllMemories(projectId);
+            } else {
+              const shared = storage.listMemories("shared", projectId);
+              const personal = storage.listMemories("personal", projectId, input.caller_id);
+              memories = [...shared, ...personal];
+            }
+          }
+
+          const report = analyzeMemories(storage, memories, input.threshold);
+          const dryRun = input.dry_run !== false; // default true
+
+          if (!dryRun) {
+            const executed = executeCuration(storage, report);
+            return JSON.stringify({
+              ok: true,
+              dry_run: false,
+              duplicate_groups: executed.duplicates.length,
+              deleted_count: executed.deleted_count,
+              stale_count: executed.stale.length,
+              report: executed,
+            });
+          }
+
+          return JSON.stringify({
+            ok: true,
+            dry_run: true,
+            duplicate_groups: report.duplicates.length,
+            would_delete: report.duplicates.reduce((n, g) => n + g.duplicates.length, 0),
+            stale_count: report.stale.length,
+            report,
+          });
         }
 
         default:

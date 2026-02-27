@@ -2,6 +2,15 @@
 
 ## v3.0.0 (unreleased)
 
+### Phase 2: Self-Curation
+
+**新機能:**
+- `memory_curate` ツール追加 — KNN ベースの重複検出 + 古いメモリのフラグ
+- Union-Find アルゴリズムによる重複グルーピング（O(n×k)）
+- `dry_run: true`（デフォルト）でレポートのみ、`false` で実際に削除
+- 90日以上更新のないメモリを stale としてレポート
+- RBAC: manager は全スコープ、worker は自分の personal のみ curate 可能
+
 ### Phase 1: Hybrid Semantic Search
 
 **新機能:**
