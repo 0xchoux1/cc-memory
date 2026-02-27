@@ -17,7 +17,7 @@ export const schemas = {
   memory_recall: z.object({
     scope: z.enum(["shared", "personal", "all"]),
     agent_id: z.string().optional(),
-    caller_id: z.string().optional(),
+    caller_id: z.string(),
     query: z.string(),
     project_id: z.string().optional(),
     limit: z.number().int().min(1).max(100).optional(),
@@ -35,7 +35,7 @@ export const schemas = {
   }),
   memory_delete: z.object({
     memory_id: z.string(),
-    caller_id: z.string().optional(),
+    caller_id: z.string(),
     project_id: z.string().optional(),
   }),
   project_create: z.object({
@@ -84,7 +84,7 @@ export const toolDefinitions = [
         project_id: { type: "string", description: "Project ID" },
         limit: { type: "number", description: "Max results (default: 10)" },
       },
-      required: ["scope", "query"],
+      required: ["scope", "query", "caller_id"],
     },
   },
   {
@@ -124,7 +124,7 @@ export const toolDefinitions = [
         caller_id: { type: "string", description: "Caller agent ID for permission checks" },
         project_id: { type: "string", description: "Project ID" },
       },
-      required: ["memory_id"],
+      required: ["memory_id", "caller_id"],
     },
   },
   {
