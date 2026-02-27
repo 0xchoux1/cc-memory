@@ -270,6 +270,21 @@ export class Storage {
     }>;
   }
 
+  // Find neighbors of an existing memory by its stored embedding
+  vectorSearchPublic(
+    memoryId: string,
+    projectId: string,
+    limit: number
+  ): Array<{ memory_id: string; distance: number }> {
+    if (!this.vectorEnabled) return [];
+    // Get stored embedding for this memory
+    const row = this.db
+      .prepare("SELECT embedding FROM vec_memories WHERE memory_id = ?")
+      .get(memoryId) as { embedding: Buffer } | undefined;
+    if (!row) return [];
+    return this.vectorSearch(new Float32Array(row.embedding.buffer.slice(row.embedding.byteOffset, row.embedding.byteOffset + row.embedding.byteLength)), projectId, limit);
+  }
+
   getMemory(id: string): Memory | undefined {
     const row = this.db.prepare("SELECT * FROM memories WHERE id = ?").get(id) as RawMemory | undefined;
     return row ? parseMemoryRow(row) : undefined;

@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { Storage } from "./storage.js";
 import { checkStorePermission, checkReadPermission, getAgentRole, AuthError } from "./auth.js";
 import { embed, DIMENSIONS } from "./embeddings.js";
+import { analyzeMemories, executeCuration } from "./curate.js";
 
 const DEFAULT_PROJECT = "default";
 
@@ -53,6 +54,14 @@ export const schemas = {
   }),
   agent_list: z.object({
     project_id: z.string(),
+  }),
+  memory_curate: z.object({
+    caller_id: z.string(),
+    scope: z.enum(["shared", "personal"]),
+    agent_id: z.string().optional(),
+    project_id: z.string().optional(),
+    dry_run: z.boolean().optional().default(true),
+    similarity_threshold: z.number().min(0).max(1).optional().default(0.85),
   }),
 };
 
@@ -171,6 +180,22 @@ export const toolDefinitions = [
         project_id: { type: "string", description: "Project ID" },
       },
       required: ["project_id"],
+    },
+  },
+  {
+    name: "memory_curate",
+    description: "Analyze and deduplicate memories. dry_run=true reports only, false deletes duplicates. Requires vector search to be enabled.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        caller_id: { type: "string", description: "Caller agent ID for permission checks" },
+        scope: { type: "string", enum: ["shared", "personal"], description: "Scope to curate" },
+        agent_id: { type: "string", description: "Target agent ID (personal scope, manager only)" },
+        project_id: { type: "string", description: "Project ID" },
+        dry_run: { type: "boolean", description: "true=report only (default), false=delete duplicates" },
+        similarity_threshold: { type: "number", description: "Cosine similarity threshold (default: 0.85)" },
+      },
+      required: ["caller_id", "scope"],
     },
   },
 ];
@@ -349,6 +374,63 @@ export function createToolHandler(storage: Storage) {
           const input = schemas.agent_list.parse(args);
           const agents = storage.listAgents(input.project_id);
           return JSON.stringify({ ok: true, count: agents.length, agents });
+        }
+
+        case "memory_curate": {
+          const input = schemas.memory_curate.parse(args);
+          const projectId = input.project_id ?? DEFAULT_PROJECT;
+
+          // Require vector search
+          if (!storage.vectorEnabled) {
+            return JSON.stringify({ ok: false, error: "Vector search is required for curation. Install sqlite-vec." });
+          }
+
+          // RBAC: shared → manager only, personal → own or manager
+          const role = getAgentRole(storage, projectId, input.caller_id);
+          if (!role) {
+            throw new AuthError(`Agent "${input.caller_id}" is not registered in project "${projectId}"`);
+          }
+          if (input.scope === "shared" && role !== "manager") {
+            throw new AuthError("Only managers can curate shared scope");
+          }
+          const targetAgent = input.scope === "personal"
+            ? (input.agent_id ?? input.caller_id)
+            : undefined;
+          if (input.scope === "personal" && targetAgent !== input.caller_id && role !== "manager") {
+            throw new AuthError("Workers can only curate their own personal memories");
+          }
+
+          // Get target memories
+          const memories = storage.listMemories(input.scope, projectId, targetAgent);
+          const report = analyzeMemories(storage, memories, input.similarity_threshold);
+
+          if (!input.dry_run) {
+            const executed = executeCuration(storage, report);
+            return JSON.stringify({
+              ok: true,
+              dry_run: false,
+              total_memories: executed.total_memories,
+              duplicate_groups: executed.duplicate_groups.length,
+              duplicates_deleted: executed.actions_taken.filter((a) => a.action === "deleted_duplicate").length,
+              stale_memories: executed.stale_memories.length,
+              actions: executed.actions_taken,
+            });
+          }
+
+          // Dry run: report only
+          return JSON.stringify({
+            ok: true,
+            dry_run: true,
+            total_memories: report.total_memories,
+            duplicate_groups: report.duplicate_groups.length,
+            duplicates_found: report.duplicate_groups.reduce((n, g) => n + g.duplicates.length, 0),
+            stale_memories: report.stale_memories.length,
+            details: report.duplicate_groups.map((g) => ({
+              keep: { id: g.anchor.id, preview: g.anchor.content.slice(0, 60) },
+              remove: g.duplicates.map((d) => ({ id: d.id, preview: d.content.slice(0, 60) })),
+              similarity: g.similarity,
+            })),
+          });
         }
 
         default:
