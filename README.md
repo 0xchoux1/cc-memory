@@ -43,6 +43,7 @@ Personal Scope（個人層）← 本人のみ読み書き
 - **Role-based Access Control** — `manager` は全スコープ読み書き可、`worker` は shared 読み取り＋自分の personal のみ
 - **MCP 対応** — Claude Code やその他 MCP クライアントからそのまま使える
 - **SQLite** — ローカル保存、クラウド不要、プライバシー重視
+- **ハイブリッド検索** — sqlite-vec によるベクトル検索 + キーワード検索のハイブリッド（v3）
 - **8 API endpoints** — シンプルで必要十分な API セット
 
 ---
@@ -82,9 +83,10 @@ cc-memory setup
 
 | ツール | 説明 |
 |--------|------|
-| `memory_store` | メモリを保存。shared スコープは manager のみ書き込み可 |
-| `memory_recall` | クエリでメモリを検索。関連度順にランキング |
+| `memory_store` | メモリを保存。shared スコープは manager のみ書き込み可。`embedding: true` でベクトル保存 |
+| `memory_recall` | クエリでメモリを検索。`embedding: true` でハイブリッド検索（ベクトル + キーワード） |
 | `memory_list` | スコープ内の全メモリを一覧 |
+| `memory_update` | メモリ内容を更新。オーナーまたは manager のみ。`embedding: true` で再ベクトル化 |
 | `memory_delete` | メモリを削除。オーナーまたは manager のみ |
 
 ### プロジェクト管理（2 本）
@@ -113,6 +115,7 @@ cc-memory setup
 | `content` | `string` | ✅ | メモリ内容 |
 | `tags` | `string[]` | - | タグ（検索用） |
 | `project_id` | `string` | - | プロジェクト ID（デフォルト: `"default"`） |
+| `embedding` | `boolean` | - | `true` でベクトル埋め込みを生成・保存 |
 
 </details>
 
@@ -127,6 +130,7 @@ cc-memory setup
 | `agent_id` | `string` | - | エージェント ID フィルタ（personal スコープ用） |
 | `project_id` | `string` | - | プロジェクト ID |
 | `limit` | `number` | - | 最大件数（1-100、デフォルト: 10） |
+| `embedding` | `boolean` | - | `true` でハイブリッド検索（ベクトル + キーワード） |
 
 > *`caller_id` は権限チェックのため実質必須です。
 > `agent_id` は personal スコープのフィルタ用です。shared スコープでは無視されます。
@@ -257,9 +261,10 @@ cc-memory setup
 ## CLI コマンド
 
 ```bash
-cc-memory setup    # DB 初期化
-cc-memory doctor   # 環境チェック
-cc-memory status   # プロジェクト・メモリの統計表示
+cc-memory setup               # DB 初期化
+cc-memory doctor              # 環境チェック（sqlite-vec 状態含む）
+cc-memory status              # プロジェクト・メモリの統計表示
+cc-memory migrate-embeddings  # 既存メモリにベクトル埋め込みを一括生成
 ```
 
 ---
@@ -385,6 +390,7 @@ A memory server for multi-agent development that separates **shared knowledge** 
 - **Role-based access** — `manager` reads/writes all; `worker` reads shared + own personal only
 - **MCP compatible** — works with Claude Code and any MCP client
 - **SQLite** — local storage, no cloud, privacy-first
+- **Hybrid search** — sqlite-vec vector search + keyword search (v3)
 - **8 API endpoints** — simple and sufficient
 
 ### Quick Start

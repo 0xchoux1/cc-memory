@@ -213,4 +213,56 @@ describe("Tool Handler", () => {
       expect(del.error).toContain("not registered");
     });
   });
+
+  // --- Embedding parameter tests ---
+  describe("embedding parameter", () => {
+    beforeEach(async () => {
+      await handle("project_create", { project_id: "p1", description: "Test" });
+      await handle("agent_register", { project_id: "p1", agent_id: "mgr", role: "manager" });
+    });
+
+    it("accepts number[] embedding on memory_store", async () => {
+      const fakeVec = Array.from({ length: 384 }, (_, i) => Math.sin(i));
+      const result = await parse("memory_store", {
+        scope: "shared", agent_id: "mgr", content: "vec test", project_id: "p1",
+        embedding: fakeVec,
+      });
+      expect(result.ok).toBe(true);
+      expect(result.embedding_status).toBe("stored");
+    });
+
+    it("accepts true embedding on memory_store (skips without transformers)", async () => {
+      const result = await parse("memory_store", {
+        scope: "shared", agent_id: "mgr", content: "auto test", project_id: "p1",
+        embedding: true,
+      });
+      expect(result.ok).toBe(true);
+      // Without @huggingface/transformers, status is "pending"
+      expect(["stored", "pending"]).toContain(result.embedding_status);
+    });
+
+    it("rejects wrong-length embedding array", async () => {
+      const result = await parse("memory_store", {
+        scope: "shared", agent_id: "mgr", content: "bad vec", project_id: "p1",
+        embedding: [1, 2, 3],
+      });
+      expect(result.ok).toBe(false);
+    });
+
+    it("accepts number[] embedding on memory_recall", async () => {
+      // Store with embedding
+      const fakeVec = Array.from({ length: 384 }, (_, i) => Math.sin(i));
+      await handle("memory_store", {
+        scope: "shared", agent_id: "mgr", content: "searchable vec", project_id: "p1",
+        embedding: fakeVec,
+      });
+
+      const result = await parse("memory_recall", {
+        scope: "shared", query: "searchable", caller_id: "mgr", project_id: "p1",
+        embedding: fakeVec,
+      });
+      expect(result.ok).toBe(true);
+      expect(result.count).toBeGreaterThanOrEqual(1);
+    });
+  });
 });
