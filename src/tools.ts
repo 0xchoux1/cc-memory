@@ -249,13 +249,20 @@ export function createToolHandler(storage: Storage) {
           } else if (input.scope === "all") {
             const role = getAgentRole(storage, projectId, callerId);
             if (role === "worker") {
-              // Worker scope=all: single search then filter to shared + own personal
+              // Worker scope=all: search shared + own personal separately, merge by score
               const limit = input.limit ?? 10;
-              const all = storage.searchMemories(input.query, "all", projectId, undefined, limit * 2, queryEmbedding);
-              const filtered = all
-                .filter((m) => m.scope === "shared" || m.agent_id === callerId)
-                .slice(0, limit);
-              return JSON.stringify({ ok: true, count: filtered.length, memories: filtered });
+              const shared = storage.searchMemories(input.query, "shared", projectId, undefined, limit, queryEmbedding);
+              const personal = storage.searchMemories(input.query, "personal", projectId, callerId, limit, queryEmbedding);
+              const seen = new Set<string>();
+              const merged: typeof shared = [];
+              for (const m of [...shared, ...personal]) {
+                if (!seen.has(m.id)) {
+                  seen.add(m.id);
+                  merged.push(m);
+                }
+              }
+              const result = merged.slice(0, limit);
+              return JSON.stringify({ ok: true, count: result.length, memories: result });
             }
             // manager can see all - fall through
           }
