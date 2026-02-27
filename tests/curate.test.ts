@@ -187,5 +187,31 @@ describe("Curation", () => {
       expect(result.ok).toBe(false);
       expect(result.error).toContain("not registered");
     });
+
+    it("worker scope=undefined does not touch shared memories", async () => {
+      // Store shared memory with embedding (only manager can)
+      const fakeVec = Array.from({ length: 384 }, (_, i) => Math.sin(i));
+      await handle("memory_store", {
+        scope: "shared", agent_id: "mgr", content: "shared rule", project_id: "p1",
+        embedding: fakeVec,
+      });
+      // Store worker personal with similar embedding
+      await handle("memory_store", {
+        scope: "personal", agent_id: "wkr", content: "my personal note", project_id: "p1",
+        embedding: fakeVec,
+      });
+
+      // Worker curates without scope — should only see own personal
+      const result = await parse("memory_curate", {
+        caller_id: "wkr", project_id: "p1", dry_run: false,
+      });
+      expect(result.ok).toBe(true);
+
+      // Shared memory must still exist
+      const shared = await parse("memory_recall", {
+        scope: "shared", query: "shared rule", caller_id: "mgr", project_id: "p1",
+      });
+      expect(shared.count).toBe(1);
+    });
   });
 });

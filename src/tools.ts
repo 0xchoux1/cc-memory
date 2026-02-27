@@ -409,13 +409,11 @@ export function createToolHandler(storage: Storage) {
             const agentId = role === "manager" ? undefined : input.caller_id;
             memories = storage.listMemories("personal", projectId, agentId);
           } else {
-            // No scope specified: manager gets all, worker gets shared + own personal
+            // No scope specified: manager gets all, worker gets own personal only
             if (role === "manager") {
               memories = storage.listAllMemories(projectId);
             } else {
-              const shared = storage.listMemories("shared", projectId);
-              const personal = storage.listMemories("personal", projectId, input.caller_id);
-              memories = [...shared, ...personal];
+              memories = storage.listMemories("personal", projectId, input.caller_id);
             }
           }
 
