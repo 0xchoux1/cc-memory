@@ -14,8 +14,12 @@ const DB_PATH = process.env.CC_MEMORY_DB ?? "cc-memory.db";
 const storage = new Storage(DB_PATH);
 const handleTool = createToolHandler(storage);
 
+import { createRequire } from "node:module";
+const require = createRequire(import.meta.url);
+const pkg = require("../package.json");
+
 const server = new Server(
-  { name: "cc-memory", version: "2.0.0" },
+  { name: "cc-memory", version: pkg.version },
   { capabilities: { tools: {} } }
 );
 
