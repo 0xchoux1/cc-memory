@@ -1,7 +1,8 @@
-// cc-memory v2 tools - MCP tool definitions and handlers
+// cc-memory v3 tools - MCP tool definitions and handlers
 import { z } from "zod";
 import type { Storage } from "./storage.js";
 import { checkStorePermission, checkReadPermission, getAgentRole, AuthError } from "./auth.js";
+import { embed, DIMENSIONS } from "./embeddings.js";
 
 const DEFAULT_PROJECT = "default";
 
@@ -13,14 +14,16 @@ export const schemas = {
     content: z.string(),
     tags: z.array(z.string()).optional(),
     project_id: z.string().optional(),
+    embedding: z.array(z.number()).length(DIMENSIONS).optional(),
   }),
   memory_recall: z.object({
     scope: z.enum(["shared", "personal", "all"]),
     agent_id: z.string().optional(),
-    caller_id: z.string().optional(),
+    caller_id: z.string(),
     query: z.string(),
     project_id: z.string().optional(),
     limit: z.number().int().min(1).max(100).optional(),
+    embedding: z.array(z.number()).length(DIMENSIONS).optional(),
   }),
   memory_list: z.object({
     scope: z.enum(["shared", "personal"]),
@@ -35,7 +38,7 @@ export const schemas = {
   }),
   memory_delete: z.object({
     memory_id: z.string(),
-    caller_id: z.string().optional(),
+    caller_id: z.string(),
     project_id: z.string().optional(),
   }),
   project_create: z.object({
@@ -58,7 +61,7 @@ export const toolDefinitions = [
   {
     name: "memory_store",
     description:
-      "Store a memory. Shared scope requires manager role. Personal scope stores for the given agent.",
+      "Store a memory. Shared scope requires manager role. Personal scope stores for the given agent. Optionally pass a pre-computed embedding (384-dim float array).",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -67,13 +70,14 @@ export const toolDefinitions = [
         content: { type: "string", description: "Memory content" },
         tags: { type: "array", items: { type: "string" }, description: "Optional tags" },
         project_id: { type: "string", description: "Project ID (default: 'default')" },
+        embedding: { type: "array", items: { type: "number" }, description: "Pre-computed embedding (384-dim). If omitted, auto-generated when available." },
       },
       required: ["scope", "agent_id", "content"],
     },
   },
   {
     name: "memory_recall",
-    description: "Search memories by query. Returns matching memories ranked by relevance.",
+    description: "Search memories by query. Returns matching memories ranked by hybrid (keyword + semantic) relevance. Optionally pass a pre-computed query embedding.",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -83,8 +87,9 @@ export const toolDefinitions = [
         query: { type: "string", description: "Search query" },
         project_id: { type: "string", description: "Project ID" },
         limit: { type: "number", description: "Max results (default: 10)" },
+        embedding: { type: "array", items: { type: "number" }, description: "Pre-computed query embedding (384-dim). If omitted, auto-generated when available." },
       },
-      required: ["scope", "query"],
+      required: ["scope", "query", "caller_id"],
     },
   },
   {
@@ -124,7 +129,7 @@ export const toolDefinitions = [
         caller_id: { type: "string", description: "Caller agent ID for permission checks" },
         project_id: { type: "string", description: "Project ID" },
       },
-      required: ["memory_id"],
+      required: ["memory_id", "caller_id"],
     },
   },
   {
@@ -170,6 +175,26 @@ export const toolDefinitions = [
   },
 ];
 
+// Resolve embedding: caller-provided > auto-generate > undefined
+async function resolveEmbedding(
+  callerEmbedding: number[] | undefined,
+  text: string,
+  vectorEnabled: boolean
+): Promise<{ embedding: Float32Array | undefined; status: "stored" | "pending" | "skipped" }> {
+  if (callerEmbedding) {
+    return { embedding: new Float32Array(callerEmbedding), status: "stored" };
+  }
+  if (!vectorEnabled) {
+    return { embedding: undefined, status: "skipped" };
+  }
+  // Auto-generate (may return null if transformers unavailable)
+  const emb = await embed(text);
+  if (emb) {
+    return { embedding: emb, status: "stored" };
+  }
+  return { embedding: undefined, status: "skipped" };
+}
+
 // Handler
 export function createToolHandler(storage: Storage) {
   return async (name: string, args: Record<string, unknown>): Promise<string> => {
@@ -181,7 +206,25 @@ export function createToolHandler(storage: Storage) {
           checkStorePermission(storage, projectId, input.agent_id, input.scope);
           const agentId = input.scope === "personal" ? input.agent_id : null;
           const memory = storage.storeMemory(projectId, input.scope, agentId, input.content, input.tags ?? null, input.agent_id);
-          return JSON.stringify({ ok: true, memory });
+
+          // Embedding: sync for caller-provided, fire-and-forget for auto-generated
+          let embeddingStatus: "stored" | "pending" | "skipped";
+          if (input.embedding) {
+            storage.storeEmbedding(memory.id, projectId, new Float32Array(input.embedding));
+            embeddingStatus = "stored";
+          } else if (storage.vectorEnabled) {
+            embeddingStatus = "pending";
+            const text = input.content + " " + (input.tags?.join(" ") ?? "");
+            embed(text)
+              .then((emb) => {
+                if (emb) storage.storeEmbedding(memory.id, projectId, emb);
+              })
+              .catch((err) => console.error("Embedding store failed:", err));
+          } else {
+            embeddingStatus = "skipped";
+          }
+
+          return JSON.stringify({ ok: true, memory, embedding_status: embeddingStatus });
         }
 
         case "memory_recall": {
@@ -189,45 +232,43 @@ export function createToolHandler(storage: Storage) {
           const projectId = input.project_id ?? DEFAULT_PROJECT;
           const callerId = input.caller_id;
 
-          // Auth check - caller_id required for access control
-          if (!callerId) {
-            throw new AuthError("caller_id is required for memory_recall");
-          }
+          // Resolve query embedding
+          const { embedding: queryEmbedding } = await resolveEmbedding(
+            input.embedding,
+            input.query,
+            storage.vectorEnabled
+          );
+
           {
             if (input.scope === "personal") {
               checkReadPermission(storage, projectId, callerId, "personal", input.agent_id);
             } else if (input.scope === "all") {
-              // For "all" scope, worker can only see shared + own personal
               const role = getAgentRole(storage, projectId, callerId);
               if (role === "worker") {
-                // Search shared + own personal separately and merge
-                const shared = storage.searchMemories(input.query, "shared", projectId, undefined, input.limit ?? 10);
-                const personal = storage.searchMemories(input.query, "personal", projectId, callerId, input.limit ?? 10);
+                const shared = storage.searchMemories(input.query, "shared", projectId, undefined, input.limit ?? 10, queryEmbedding);
+                const personal = storage.searchMemories(input.query, "personal", projectId, callerId, input.limit ?? 10, queryEmbedding);
                 const merged = [...shared, ...personal]
                   .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
                   .slice(0, input.limit ?? 10);
                 return JSON.stringify({ ok: true, count: merged.length, memories: merged });
               }
-              // manager can see all - fall through
             }
-            // shared: everyone can read - no check needed
           }
 
-          // For shared scope, ignore agent_id filter (shared memories have agent_id=NULL)
           const agentFilter = input.scope === "shared" ? undefined : input.agent_id;
           const memories = storage.searchMemories(
             input.query,
             input.scope,
             projectId,
             agentFilter,
-            input.limit ?? 10
+            input.limit ?? 10,
+            queryEmbedding
           );
           return JSON.stringify({ ok: true, count: memories.length, memories });
         }
 
         case "memory_list": {
           const input = schemas.memory_list.parse(args);
-          // For shared scope, ignore agent_id filter (shared memories have agent_id=NULL)
           const listAgentFilter = input.scope === "shared" ? undefined : input.agent_id;
           const memories = storage.listMemories(input.scope, input.project_id, listAgentFilter);
           return JSON.stringify({ ok: true, count: memories.length, memories });
@@ -249,16 +290,21 @@ export function createToolHandler(storage: Storage) {
             throw new AuthError("Only the memory owner or a manager can update memories");
           }
           const updated = storage.updateMemory(input.memory_id, input.content, input.caller_id);
+
+          // Re-generate embedding
+          if (storage.vectorEnabled) {
+            embed(input.content)
+              .then((emb) => {
+                if (emb) storage.storeEmbedding(input.memory_id, projectId, emb);
+              })
+              .catch((err) => console.error("Embedding update failed:", err));
+          }
+
           return JSON.stringify({ ok: true, memory: updated });
         }
 
         case "memory_delete": {
           const input = schemas.memory_delete.parse(args);
-
-          // Auth check - caller_id required for access control
-          if (!input.caller_id) {
-            throw new AuthError("caller_id is required for memory_delete");
-          }
           {
             const projectId = input.project_id ?? DEFAULT_PROJECT;
             const memory = storage.getMemory(input.memory_id);
@@ -267,7 +313,6 @@ export function createToolHandler(storage: Storage) {
               if (!role) {
                 throw new AuthError(`Agent "${input.caller_id}" is not registered in project "${projectId}"`);
               }
-              // Only owner or manager can delete
               const isOwner = memory.agent_id === input.caller_id || memory.created_by === input.caller_id;
               if (!isOwner && role !== "manager") {
                 throw new AuthError("Only the memory owner or a manager can delete memories");
@@ -292,7 +337,6 @@ export function createToolHandler(storage: Storage) {
 
         case "agent_register": {
           const input = schemas.agent_register.parse(args);
-          // Verify project exists
           const project = storage.getProject(input.project_id);
           if (!project) {
             return JSON.stringify({ ok: false, error: `Project "${input.project_id}" not found` });
