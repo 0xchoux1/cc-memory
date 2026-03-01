@@ -55,6 +55,11 @@ semantic_search(type="preference")
 - `/reflect` - パターンと洞察を分析
 - `/memory-status` - メモリ統計を確認
 
+## 自律メモリスキル
+
+- `/digest [days]` — セッションログから知識を抽出してcc-memoryに保存（デフォルト: 直近3日）
+- `/consolidate` — メモリの重複整理・品質改善（デフォルトdry-run、承認後に実行）
+
 ## ワークフロー例
 
 1. ユーザーがタスクを依頼
