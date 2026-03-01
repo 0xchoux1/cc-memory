@@ -13,6 +13,24 @@ allowed-tools: Read, Grep, Glob, Bash(find:*, stat:*, python3:*), mcp__cc-memory
 
 ## Instructions
 
+### Step 0: エージェント情報と保存先 scope の確認
+
+抽出した知識の保存先 scope を決定するため、自身の role を確認する:
+
+```
+agent_list({ project_id: "<現在のproject_id>" })
+```
+
+結果から自身の agent_id に対応する role を取得し、以下のルールで scope を決定する:
+
+| role | 保存先 scope | 理由 |
+|------|-------------|------|
+| manager | `"shared"` | プロジェクト全体で共有すべき知識 |
+| worker | `"personal"` | shared への書き込み権限がない |
+| 未登録/不明 | `"personal"` | 安全側に倒す |
+
+この scope を以降の Step で `<保存先scope>` として参照する。
+
 ### Step 1: 処理済みセッションの確認
 
 `mcp__cc-memory__memory_list` で personal スコープの全メモリを取得し、`tags` に `"digest-log"` を含むエントリをフィルタする:
@@ -139,17 +157,13 @@ print(output)
 2. **新規の場合** — `memory_store` で保存:
    ```
    memory_store({
-     scope: "<実行エージェントのroleに応じたscope>",
+     scope: "<Step 0 で決定した保存先scope>",
      agent_id: "<実行エージェントのID>",
      content: "<知識の内容>",
      tags: ["<カテゴリ>", "digest"],
      embedding: true
    })
    ```
-   **scope の決定ルール**:
-   - manager role → `"shared"`（プロジェクト全体で共有）
-   - worker role → `"personal"`（shared への書き込み権限がないため）
-   - role が不明な場合 → `"personal"` をデフォルトとする
 
 3. **既存記憶の更新が必要な場合** — `memory_update` で内容を更新:
    ```
