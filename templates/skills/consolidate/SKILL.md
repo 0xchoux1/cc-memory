@@ -134,16 +134,17 @@ memory_delete({
    })
    ```
 
-2. 正しいタグで再保存:
+2. 元の記憶と同じ scope / agent_id で再保存:
    ```
    memory_store({
      scope: "<元のscope>",
-     agent_id: "claude-code",
+     agent_id: "<元のagent_id>",
      content: "<元のcontent>",
      tags: ["<新しいタグ>"],
      embedding: true
    })
    ```
+   **重要**: agent_id は元の記憶のオーナーをそのまま使うこと。ハードコードしない。
 
 ### Step 5: 結果サマリー
 

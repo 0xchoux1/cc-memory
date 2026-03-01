@@ -15,18 +15,18 @@ allowed-tools: Read, Grep, Glob, Bash(find:*, stat:*, python3:*), mcp__cc-memory
 
 ### Step 1: 処理済みセッションの確認
 
-`mcp__cc-memory__memory_recall` で過去に処理したセッションを検索する:
+`mcp__cc-memory__memory_list` で personal スコープの全メモリを取得し、`tags` に `"digest-log"` を含むエントリをフィルタする:
 
 ```
-memory_recall({
+memory_list({
   scope: "personal",
-  query: "digest-log session processed",
-  caller_id: "claude-code",
-  limit: 50
+  agent_id: "<実行エージェントのID>"
 })
 ```
 
 結果から `tags` に `"digest-log"` を含むエントリの content を収集し、処理済みセッションIDのリストを作成する。
+
+**注意**: `memory_recall` の limit ではなく `memory_list` を使うことで、処理済みセッション数が増えても漏れなく取得できる。
 
 ### Step 2: セッションファイルの探索
 
@@ -139,13 +139,17 @@ print(output)
 2. **新規の場合** — `memory_store` で保存:
    ```
    memory_store({
-     scope: "shared",
-     agent_id: "claude-code",
+     scope: "<実行エージェントのroleに応じたscope>",
+     agent_id: "<実行エージェントのID>",
      content: "<知識の内容>",
      tags: ["<カテゴリ>", "digest"],
      embedding: true
    })
    ```
+   **scope の決定ルール**:
+   - manager role → `"shared"`（プロジェクト全体で共有）
+   - worker role → `"personal"`（shared への書き込み権限がないため）
+   - role が不明な場合 → `"personal"` をデフォルトとする
 
 3. **既存記憶の更新が必要な場合** — `memory_update` で内容を更新:
    ```
@@ -166,7 +170,7 @@ print(output)
 ```
 memory_store({
   scope: "personal",
-  agent_id: "claude-code",
+  agent_id: "<実行エージェントのID>",
   content: "digest-log: session=<セッションID> processed_at=<ISO timestamp> extracted=<抽出した知識の数>",
   tags: ["digest-log"]
 })
