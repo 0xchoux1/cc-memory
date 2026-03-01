@@ -53,8 +53,7 @@ memory_list({
 ```bash
 # $ARGUMENTS が空なら DAYS=3、数値なら指定値を使う
 DAYS="${ARGUMENTS:-3}"
-# subagents/ 配下を除外してメインセッションのみ列挙
-find ~/.claude/projects -name "*.jsonl" -not -path "*/subagents/*" -mtime -${DAYS} -type f 2>/dev/null
+find ~/.claude/projects -name "*.jsonl" -mtime -${DAYS} -type f 2>/dev/null
 ```
 
 各ファイルのベース名（拡張子なし）がセッションIDとなる。
@@ -85,13 +84,13 @@ with open(sys.argv[1], "r") as f:
         except json.JSONDecodeError:
             continue
 
-        # Claude Code JSONL: type が "user" / "assistant" でロールを直接示す
-        rec_type = record.get("type", "")
-        if rec_type not in ("user", "assistant"):
+        if record.get("type") != "message":
             continue
-        role = rec_type
 
         msg = record.get("message", {})
+        role = msg.get("role")
+        if role not in ("user", "assistant"):
+            continue
 
         # assistant のストリーミング重複を message.id でデデュプ
         msg_id = msg.get("id")
