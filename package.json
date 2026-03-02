@@ -1,6 +1,6 @@
 {
   "name": "cc-memory",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "Multi-agent memory server with scope-based access control - MCP Server",
   "main": "dist/server.js",
   "bin": {
@@ -41,5 +41,8 @@
   },
   "engines": {
     "node": ">=18.0.0"
+  },
+  "optionalDependencies": {
+    "@huggingface/transformers": "^3.8.1"
   }
 }

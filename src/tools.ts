@@ -331,7 +331,7 @@ export function createToolHandler(storage: Storage) {
             throw new AuthError("Only the memory owner or a manager can update memories");
           }
           // updateMemory deletes stale embedding automatically
-          const updated = storage.updateMemory(input.memory_id, input.caller_id, input.content, input.tags);
+          const updated = storage.updateMemory(input.memory_id, input.caller_id, { content: input.content, tags: input.tags });
 
           // Re-generate embedding if requested (use new or existing content)
           const embeddingContent = input.content ?? memory.content;

@@ -356,7 +356,8 @@ export class Storage {
     return row ? parseMemoryRow(row) : undefined;
   }
 
-  updateMemory(id: string, updatedBy: string, content?: string, tags?: string[]): Memory | null {
+  updateMemory(id: string, updatedBy: string, opts: { content?: string; tags?: string[] } = {}): Memory | null {
+    const { content, tags } = opts;
     const now = new Date().toISOString();
     const setClauses: string[] = ["updated_at = ?"];
     const params: unknown[] = [now];
