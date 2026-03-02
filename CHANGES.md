@@ -2,6 +2,29 @@
 
 ## v3.0.0 (unreleased)
 
+### Autonomous Memory Skills (PR #10, #12)
+
+**新機能:**
+- `/digest [days]` スキル追加 — セッションJSONLから知識を自動抽出し cc-memory に保存
+  - python3 による JSONL 前処理（ストリーミング重複のデデュプ、サイズ制限）
+  - 処理済みセッションを digest-log で追跡し、再処理を防止
+  - 知識カテゴリ: decision / lesson / preference / fact
+  - agent role に応じた scope 自動決定（manager→shared, worker→personal）
+- `/consolidate` スキル追加 — メモリの重複統合・品質改善（dry-run→承認→実行）
+  - MERGE / DELETE / RETAG の3種類の変更操作
+
+**修正:**
+- JSONL パース: Claude Code の実フォーマット（`type: "user"/"assistant"`）に対応（PR #12）
+- subagents ディレクトリを探索対象から除外（PR #12）
+
+### memory_update tags 対応 (PR #13)
+
+**新機能:**
+- `memory_update` に `tags` パラメータ追加
+  - 省略時は既存タグを保持（後方互換）
+  - 指定時は既存タグを置換
+- consolidate の RETAG が delete+re-store 不要に
+
 ### Phase 2: Self-Curation
 
 **新機能:**
