@@ -1,6 +1,6 @@
 # Changelog
 
-## v3.0.0 (unreleased)
+## v3.1.0
 
 ### Autonomous Memory Skills (PR #10, #12)
 
@@ -27,6 +27,14 @@
 - `memory_update` の `content` を optional に変更（PR #14）
   - tags だけ変更したい場合に content の再送が不要に
   - `content` と `tags` の少なくとも一方が必須（バリデーション）
+
+**リファクタ:**
+- `updateMemory` のシグネチャを options object パターンに変更（PR #15）
+  - `(id, updatedBy, content?, tags?)` → `(id, updatedBy, { content?, tags? })`
+
+**依存関係:**
+- `@huggingface/transformers` を optionalDependencies に追加（PR #15）
+  - ベクトル埋め込み生成が有効に（ハイブリッド検索の精度向上）
 
 ### Phase 2: Self-Curation
 

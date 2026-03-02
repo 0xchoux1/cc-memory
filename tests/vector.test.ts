@@ -69,7 +69,7 @@ describe("Vector Search", () => {
     storage.storeEmbedding(m.id, "default", fakeEmbedding(1));
 
     // Update content — old embedding should be deleted
-    storage.updateMemory(m.id, "a1", "completely new content");
+    storage.updateMemory(m.id, "a1", { content: "completely new content" });
 
     // Hybrid search with old embedding should not find a vector match
     // (keyword match may still work, but the old vector is gone)
