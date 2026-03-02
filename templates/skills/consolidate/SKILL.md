@@ -124,27 +124,19 @@ memory_delete({
 
 #### RETAG の実行
 
-`memory_update` は tags を変更できないため、delete → re-store で対応する:
+`memory_update` の `tags` パラメータでタグを直接更新する:
 
-1. 元の記憶を削除:
-   ```
-   memory_delete({
-     memory_id: "<元のID>",
-     caller_id: "claude-code"
-   })
-   ```
+```
+memory_update({
+  memory_id: "<元のID>",
+  content: "<元のcontent>",
+  tags: ["<新しいタグ>"],
+  caller_id: "claude-code",
+  embedding: true
+})
+```
 
-2. 元の記憶と同じ scope / agent_id で再保存:
-   ```
-   memory_store({
-     scope: "<元のscope>",
-     agent_id: "<元のagent_id>",
-     content: "<元のcontent>",
-     tags: ["<新しいタグ>"],
-     embedding: true
-   })
-   ```
-   **重要**: agent_id は元の記憶のオーナーをそのまま使うこと。ハードコードしない。
+**注意**: `content` は必須パラメータのため、元の内容をそのまま渡すこと。
 
 ### Step 5: 結果サマリー
 
@@ -160,7 +152,6 @@ memory_delete({
 
 ## Notes
 
-- `memory_update` は tags フィールドを受け付けないため、RETAG は delete + re-store で実施する
 - digest-log エントリ（処理済みセッション記録）は分析対象外とする
 - 変更は必ずユーザーの承認を得てから実行する（dry-run がデフォルト）
 - 大量の変更がある場合は、カテゴリごとに分けて段階的に承認を求める

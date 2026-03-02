@@ -356,11 +356,19 @@ export class Storage {
     return row ? parseMemoryRow(row) : undefined;
   }
 
-  updateMemory(id: string, content: string, updatedBy: string): Memory | null {
+  updateMemory(id: string, content: string, updatedBy: string, tags?: string[]): Memory | null {
     const now = new Date().toISOString();
-    const result = this.db
-      .prepare("UPDATE memories SET content = ?, updated_at = ? WHERE id = ?")
-      .run(content, now, id);
+    let result;
+    if (tags !== undefined) {
+      const tagsJson = JSON.stringify(tags);
+      result = this.db
+        .prepare("UPDATE memories SET content = ?, tags = ?, updated_at = ? WHERE id = ?")
+        .run(content, tagsJson, now, id);
+    } else {
+      result = this.db
+        .prepare("UPDATE memories SET content = ?, updated_at = ? WHERE id = ?")
+        .run(content, now, id);
+    }
     if (result.changes === 0) return null;
     // Content changed — old embedding is now stale
     this.deleteEmbedding(id);
