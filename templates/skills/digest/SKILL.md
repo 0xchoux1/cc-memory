@@ -29,13 +29,13 @@ agent_list({ project_id: "<現在のproject_id>" })
 | worker | `"personal"` | shared への書き込み権限がない |
 | 未登録/不明 | `"personal"` | 安全側に倒す |
 
-**未登録の場合**: `memory_store` が失敗するため、先にエージェントを登録する:
+**未登録の場合**: `memory_store` が失敗するため、先にエージェントを登録する。role はプロジェクトの方針に従って設定すること:
 
 ```
 agent_register({
   project_id: "<現在のproject_id>",
   agent_id: "<自身のagent_id>",
-  role: "manager"
+  role: "<プロジェクトでの役割: manager or worker>"
 })
 ```
 
