@@ -104,5 +104,28 @@ describe("Storage", () => {
       const m = storage.storeMemory("p1", "shared", null, "No author", null);
       expect(m.created_by).toBeNull();
     });
+
+    it("updates content only (tags preserved)", () => {
+      const m = storage.storeMemory("p1", "shared", null, "Original", ["tag1", "tag2"]);
+      const updated = storage.updateMemory(m.id, "Updated content", "agent-a");
+      expect(updated).not.toBeNull();
+      expect(updated!.content).toBe("Updated content");
+      expect(updated!.tags).toEqual(["tag1", "tag2"]);
+    });
+
+    it("updates content and tags together", () => {
+      const m = storage.storeMemory("p1", "shared", null, "Original", ["old-tag"]);
+      const updated = storage.updateMemory(m.id, "Updated content", "agent-a", ["new-tag1", "new-tag2"]);
+      expect(updated).not.toBeNull();
+      expect(updated!.content).toBe("Updated content");
+      expect(updated!.tags).toEqual(["new-tag1", "new-tag2"]);
+    });
+
+    it("updates tags to empty array", () => {
+      const m = storage.storeMemory("p1", "shared", null, "Content", ["tag1"]);
+      const updated = storage.updateMemory(m.id, "Content", "agent-a", []);
+      expect(updated).not.toBeNull();
+      expect(updated!.tags).toEqual([]);
+    });
   });
 });

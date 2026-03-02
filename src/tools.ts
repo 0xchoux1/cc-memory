@@ -37,6 +37,7 @@ export const schemas = {
   memory_update: z.object({
     memory_id: z.string(),
     content: z.string(),
+    tags: z.array(z.string()).optional(),
     caller_id: z.string(),
     project_id: z.string().optional(),
     embedding: embeddingSchema,
@@ -153,12 +154,13 @@ export const toolDefinitions = [
   },
   {
     name: "memory_update",
-    description: "Update the content of an existing memory. Only the owner or a manager can update.",
+    description: "Update the content and/or tags of an existing memory. Only the owner or a manager can update.",
     inputSchema: {
       type: "object" as const,
       properties: {
         memory_id: { type: "string", description: "Memory ID to update" },
         content: { type: "string", description: "New content for the memory" },
+        tags: { type: "array", items: { type: "string" }, description: "New tags (replaces existing tags). Omit to keep current tags." },
         caller_id: { type: "string", description: "Caller agent ID for permission checks" },
         project_id: { type: "string", description: "Project ID" },
         embedding: { oneOf: [{ type: "boolean", const: true }, { type: "array", items: { type: "number" } }], description: "true = auto-generate embedding, number[384] = use provided vector" },
@@ -326,7 +328,7 @@ export function createToolHandler(storage: Storage) {
             throw new AuthError("Only the memory owner or a manager can update memories");
           }
           // updateMemory deletes stale embedding automatically
-          const updated = storage.updateMemory(input.memory_id, input.content, input.caller_id);
+          const updated = storage.updateMemory(input.memory_id, input.content, input.caller_id, input.tags);
 
           // Re-generate embedding if requested
           const { embedding: newEmb, status: embeddingStatus } = await resolveEmbedding(
