@@ -29,6 +29,16 @@ agent_list({ project_id: "<現在のproject_id>" })
 | worker | `"personal"` | shared への書き込み権限がない |
 | 未登録/不明 | `"personal"` | 安全側に倒す |
 
+**未登録の場合**: `memory_store` が失敗するため、先にエージェントを登録する:
+
+```
+agent_register({
+  project_id: "<現在のproject_id>",
+  agent_id: "<自身のagent_id>",
+  role: "manager"
+})
+```
+
 この scope を以降の Step で `<保存先scope>` として参照する。
 
 ### Step 1: 処理済みセッションの確認
