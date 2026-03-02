@@ -86,7 +86,7 @@ cc-memory setup
 | `memory_store` | メモリを保存。shared スコープは manager のみ書き込み可。`embedding: true` でベクトル保存 |
 | `memory_recall` | クエリでメモリを検索。`embedding: true` でハイブリッド検索（ベクトル + キーワード） |
 | `memory_list` | スコープ内の全メモリを一覧 |
-| `memory_update` | メモリ内容を更新。オーナーまたは manager のみ。`embedding: true` で再ベクトル化 |
+| `memory_update` | メモリ内容・タグを更新。オーナーまたは manager のみ。`embedding: true` で再ベクトル化 |
 | `memory_delete` | メモリを削除。オーナーまたは manager のみ |
 | `memory_curate` | 重複・古いメモリを検出・削除。`dry_run: true`（デフォルト）でレポートのみ |
 
@@ -146,6 +146,20 @@ cc-memory setup
 | `scope` | `"shared" \| "personal"` | ✅ | メモリスコープ |
 | `agent_id` | `string` | - | エージェント ID フィルタ（personal スコープ用。shared では無視） |
 | `project_id` | `string` | - | プロジェクト ID |
+
+</details>
+
+<details>
+<summary><code>memory_update</code></summary>
+
+| パラメータ | 型 | 必須 | 説明 |
+|-----------|------|------|------|
+| `memory_id` | `string` | ✅ | 更新するメモリの ID |
+| `content` | `string` | - | 新しい内容（省略時は既存内容を保持） |
+| `tags` | `string[]` | - | 新しいタグ（省略時は既存タグを保持） |
+| `caller_id` | `string` | ✅* | 呼び出し元エージェント ID |
+| `project_id` | `string` | - | プロジェクト ID |
+| `embedding` | `boolean` | - | `true` でベクトル埋め込みを再生成 |
 
 </details>
 
