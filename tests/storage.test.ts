@@ -107,7 +107,7 @@ describe("Storage", () => {
 
     it("updates content only (tags preserved)", () => {
       const m = storage.storeMemory("p1", "shared", null, "Original", ["tag1", "tag2"]);
-      const updated = storage.updateMemory(m.id, "Updated content", "agent-a");
+      const updated = storage.updateMemory(m.id, "agent-a", "Updated content");
       expect(updated).not.toBeNull();
       expect(updated!.content).toBe("Updated content");
       expect(updated!.tags).toEqual(["tag1", "tag2"]);
@@ -115,7 +115,7 @@ describe("Storage", () => {
 
     it("updates content and tags together", () => {
       const m = storage.storeMemory("p1", "shared", null, "Original", ["old-tag"]);
-      const updated = storage.updateMemory(m.id, "Updated content", "agent-a", ["new-tag1", "new-tag2"]);
+      const updated = storage.updateMemory(m.id, "agent-a", "Updated content", ["new-tag1", "new-tag2"]);
       expect(updated).not.toBeNull();
       expect(updated!.content).toBe("Updated content");
       expect(updated!.tags).toEqual(["new-tag1", "new-tag2"]);
@@ -123,9 +123,17 @@ describe("Storage", () => {
 
     it("updates tags to empty array", () => {
       const m = storage.storeMemory("p1", "shared", null, "Content", ["tag1"]);
-      const updated = storage.updateMemory(m.id, "Content", "agent-a", []);
+      const updated = storage.updateMemory(m.id, "agent-a", "Content", []);
       expect(updated).not.toBeNull();
       expect(updated!.tags).toEqual([]);
+    });
+
+    it("updates tags only (content preserved)", () => {
+      const m = storage.storeMemory("p1", "shared", null, "Keep this content", ["old-tag"]);
+      const updated = storage.updateMemory(m.id, "agent-a", undefined, ["new-tag"]);
+      expect(updated).not.toBeNull();
+      expect(updated!.content).toBe("Keep this content");
+      expect(updated!.tags).toEqual(["new-tag"]);
     });
   });
 });

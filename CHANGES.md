@@ -17,13 +17,16 @@
 - JSONL パース: Claude Code の実フォーマット（`type: "user"/"assistant"`）に対応（PR #12）
 - subagents ディレクトリを探索対象から除外（PR #12）
 
-### memory_update tags 対応 (PR #13)
+### memory_update 改善 (PR #13, #14)
 
 **新機能:**
-- `memory_update` に `tags` パラメータ追加
+- `memory_update` に `tags` パラメータ追加（PR #13）
   - 省略時は既存タグを保持（後方互換）
   - 指定時は既存タグを置換
-- consolidate の RETAG が delete+re-store 不要に
+  - consolidate の RETAG が delete+re-store 不要に
+- `memory_update` の `content` を optional に変更（PR #14）
+  - tags だけ変更したい場合に content の再送が不要に
+  - `content` と `tags` の少なくとも一方が必須（バリデーション）
 
 ### Phase 2: Self-Curation
 

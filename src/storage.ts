@@ -356,22 +356,29 @@ export class Storage {
     return row ? parseMemoryRow(row) : undefined;
   }
 
-  updateMemory(id: string, content: string, updatedBy: string, tags?: string[]): Memory | null {
+  updateMemory(id: string, updatedBy: string, content?: string, tags?: string[]): Memory | null {
     const now = new Date().toISOString();
-    let result;
-    if (tags !== undefined) {
-      const tagsJson = JSON.stringify(tags);
-      result = this.db
-        .prepare("UPDATE memories SET content = ?, tags = ?, updated_at = ? WHERE id = ?")
-        .run(content, tagsJson, now, id);
-    } else {
-      result = this.db
-        .prepare("UPDATE memories SET content = ?, updated_at = ? WHERE id = ?")
-        .run(content, now, id);
+    const setClauses: string[] = ["updated_at = ?"];
+    const params: unknown[] = [now];
+
+    if (content !== undefined) {
+      setClauses.unshift("content = ?");
+      params.unshift(content);
     }
+    if (tags !== undefined) {
+      setClauses.splice(setClauses.length - 1, 0, "tags = ?");
+      params.splice(params.length - 1, 0, JSON.stringify(tags));
+    }
+
+    params.push(id);
+    const result = this.db
+      .prepare(`UPDATE memories SET ${setClauses.join(", ")} WHERE id = ?`)
+      .run(...params);
     if (result.changes === 0) return null;
     // Content changed — old embedding is now stale
-    this.deleteEmbedding(id);
+    if (content !== undefined) {
+      this.deleteEmbedding(id);
+    }
     return this.getMemory(id) ?? null;
   }
 

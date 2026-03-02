@@ -155,7 +155,7 @@ cc-memory setup
 | パラメータ | 型 | 必須 | 説明 |
 |-----------|------|------|------|
 | `memory_id` | `string` | ✅ | 更新するメモリの ID |
-| `content` | `string` | ✅ | 新しい内容 |
+| `content` | `string` | - | 新しい内容（省略時は既存内容を保持） |
 | `tags` | `string[]` | - | 新しいタグ（省略時は既存タグを保持） |
 | `caller_id` | `string` | ✅* | 呼び出し元エージェント ID |
 | `project_id` | `string` | - | プロジェクト ID |

@@ -36,12 +36,15 @@ export const schemas = {
   }),
   memory_update: z.object({
     memory_id: z.string(),
-    content: z.string(),
+    content: z.string().optional(),
     tags: z.array(z.string()).optional(),
     caller_id: z.string(),
     project_id: z.string().optional(),
     embedding: embeddingSchema,
-  }),
+  }).refine(
+    (data) => data.content !== undefined || data.tags !== undefined,
+    { message: "At least one of 'content' or 'tags' must be provided" }
+  ),
   memory_delete: z.object({
     memory_id: z.string(),
     caller_id: z.string(),
@@ -154,18 +157,18 @@ export const toolDefinitions = [
   },
   {
     name: "memory_update",
-    description: "Update the content and/or tags of an existing memory. Only the owner or a manager can update.",
+    description: "Update the content and/or tags of an existing memory. At least one of content or tags must be provided. Only the owner or a manager can update.",
     inputSchema: {
       type: "object" as const,
       properties: {
         memory_id: { type: "string", description: "Memory ID to update" },
-        content: { type: "string", description: "New content for the memory" },
+        content: { type: "string", description: "New content for the memory. Omit to keep current content." },
         tags: { type: "array", items: { type: "string" }, description: "New tags (replaces existing tags). Omit to keep current tags." },
         caller_id: { type: "string", description: "Caller agent ID for permission checks" },
         project_id: { type: "string", description: "Project ID" },
         embedding: { oneOf: [{ type: "boolean", const: true }, { type: "array", items: { type: "number" } }], description: "true = auto-generate embedding, number[384] = use provided vector" },
       },
-      required: ["memory_id", "content", "caller_id"],
+      required: ["memory_id", "caller_id"],
     },
   },
   {
@@ -328,11 +331,12 @@ export function createToolHandler(storage: Storage) {
             throw new AuthError("Only the memory owner or a manager can update memories");
           }
           // updateMemory deletes stale embedding automatically
-          const updated = storage.updateMemory(input.memory_id, input.content, input.caller_id, input.tags);
+          const updated = storage.updateMemory(input.memory_id, input.caller_id, input.content, input.tags);
 
-          // Re-generate embedding if requested
+          // Re-generate embedding if requested (use new or existing content)
+          const embeddingContent = input.content ?? memory.content;
           const { embedding: newEmb, status: embeddingStatus } = await resolveEmbedding(
-            input.content, input.embedding, storage.vectorEnabled
+            embeddingContent, input.embedding, storage.vectorEnabled
           );
           if (newEmb) {
             storage.storeEmbedding(input.memory_id, projectId, newEmb);
