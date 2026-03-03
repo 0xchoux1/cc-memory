@@ -6,33 +6,31 @@
 
 **重要**: 新しいセッションでユーザーの最初のメッセージを受け取ったら、以下を実行すること：
 
-1. `memory_recall` でユーザーの発言に関連する記憶を検索
-2. `semantic_search` でユーザーの好みや設定を確認
+1. `memory_recall` でユーザーの発言に関連する長期記憶を検索
+2. `session_recall` で直近セッションの関連コンテキストを検索
 3. 検索結果を踏まえて応答する
 
 ```
 # 例: ユーザーが「認証機能を実装して」と言った場合
-memory_recall(query="認証 実装")
-semantic_search(type="preference")
+memory_recall(scope="all", query="認証 実装", caller_id="claude-code", embedding=true)
+session_recall(query="認証 実装", caller_id="claude-code", embedding=true)
 ```
+
+> **注意**: `memory_recall` / `session_recall` は caller_id のエージェントがプロジェクトに登録済みである必要があります。未登録の場合は先に `agent_register` を実行してください。
 
 ## 記憶の保存タイミング
 
-以下のタイミングで記憶を保存すること：
+以下のタイミングで `memory_store` を使って記憶を保存すること：
 
-| 状況 | 使用ツール | 例 |
-|------|-----------|-----|
-| ユーザーの好み・設定を学んだ | `semantic_create` (type: preference) | コードスタイル、使用ツール |
-| 重要な事実を学んだ | `semantic_create` (type: fact) | プロジェクト構成、API仕様 |
-| タスクが完了した | `episode_record` (type: success/milestone) | 機能実装、バグ修正 |
-| エラーを解決した | `episode_record` (type: error) | デバッグ経緯、解決策 |
-| パターンを発見した | `semantic_create` (type: pattern) | コードパターン、ワークフロー |
+| 状況 | tags | 例 |
+|------|------|-----|
+| ユーザーの好み・設定を学んだ | `["preference"]` | コードスタイル、使用ツール |
+| 重要な事実を学んだ | `["fact"]` | プロジェクト構成、API仕様 |
+| タスクが完了した | `["milestone"]` | 機能実装、バグ修正 |
+| エラーを解決した | `["lesson"]` | デバッグ経緯、解決策 |
+| 設計判断を下した | `["decision"]` | アーキテクチャ選定、技術選定 |
 
-## 記憶の優先度
-
-- importance 8-10: 絶対に覚えておくべき（ユーザーの重要な好み、重大なマイルストーン）
-- importance 5-7: 一般的な記憶（通常のタスク完了、学んだ事実）
-- importance 1-4: 軽微な記憶（小さな修正、一時的な情報）
+保存時は `embedding: true` を指定してベクトル検索を有効にすること。
 
 ---
 
@@ -59,6 +57,7 @@ semantic_search(type="preference")
 
 - `/digest [days]` — セッションログから知識を抽出してcc-memoryに保存（デフォルト: 直近3日）
 - `/consolidate` — メモリの重複整理・品質改善（デフォルトdry-run、承認後に実行）
+- `/improve [項目]` — ROADMAP.md の次の改善項目を実装（branch → 実装 → テスト → PR → ROADMAP更新）
 
 ## ワークフロー例
 
