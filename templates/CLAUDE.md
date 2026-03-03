@@ -16,6 +16,8 @@ memory_recall(scope="all", query="認証 実装", caller_id="claude-code", embed
 session_recall(query="認証 実装", caller_id="claude-code", embedding=true)
 ```
 
+> **注意**: `memory_recall` / `session_recall` は caller_id のエージェントがプロジェクトに登録済みである必要があります。未登録の場合は先に `agent_register` を実行してください。
+
 ## 記憶の保存タイミング
 
 以下のタイミングで `memory_store` を使って記憶を保存すること：
