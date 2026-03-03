@@ -3,7 +3,6 @@
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, basename } from "node:path";
-import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import type { Storage } from "./storage.js";
 import type { SessionChunk } from "./types.js";
@@ -131,26 +130,41 @@ export async function searchChunks(
 // --- Internal helpers ---
 
 function extractTurns(lines: string[]): Turn[] {
-  const records: SessionRecord[] = [];
-  const seenIds = new Set<string>();
+  // Parse all user/assistant records, dedup assistant by message.id (keep last = complete)
+  const rawRecords: SessionRecord[] = [];
 
   for (const line of lines) {
     try {
       const record = JSON.parse(line) as SessionRecord;
       const recType = record.type;
       if (recType !== "user" && recType !== "assistant") continue;
-
-      // Dedup assistant streaming duplicates by message.id
-      const msgId = record.message?.id;
-      if (msgId) {
-        if (seenIds.has(msgId)) continue;
-        seenIds.add(msgId);
-      }
-
-      records.push(record);
+      rawRecords.push(record);
     } catch {
       // skip unparseable lines
     }
+  }
+
+  // Dedup: for assistant records with the same message.id, keep the last occurrence (complete response)
+  const lastIndexById = new Map<string, number>();
+  for (let i = 0; i < rawRecords.length; i++) {
+    const msgId = rawRecords[i].message?.id;
+    if (msgId) {
+      lastIndexById.set(msgId, i);
+    }
+  }
+
+  const records: SessionRecord[] = [];
+  const seenIds = new Set<string>();
+  for (let i = 0; i < rawRecords.length; i++) {
+    const record = rawRecords[i];
+    const msgId = record.message?.id;
+    if (msgId) {
+      // Only keep the last occurrence of each message.id
+      if (lastIndexById.get(msgId) !== i) continue;
+      if (seenIds.has(msgId)) continue;
+      seenIds.add(msgId);
+    }
+    records.push(record);
   }
 
   // Pair up user + assistant turns
@@ -239,36 +253,44 @@ function findSessionFiles(cutoff: Date): string[] {
     for (const dir of projectDirs) {
       const projectDir = join(CLAUDE_PROJECTS_DIR, dir);
       try {
-        const stat = statSync(projectDir);
-        if (!stat.isDirectory()) continue;
+        if (!statSync(projectDir).isDirectory()) continue;
       } catch {
         continue;
       }
 
-      try {
-        const entries = readdirSync(projectDir);
-        for (const entry of entries) {
-          if (!entry.endsWith(".jsonl")) continue;
-          // Skip subagents directory
-          if (entry === "subagents") continue;
-
-          const fullPath = join(projectDir, entry);
-          try {
-            const stat = statSync(fullPath);
-            if (stat.isFile() && stat.mtime >= cutoff) {
-              files.push(fullPath);
-            }
-          } catch {
-            // skip
-          }
-        }
-      } catch {
-        // skip unreadable dirs
-      }
+      // Scan session dirs (e.g. ~/.claude/projects/<project>/<session-id>/)
+      // Structure: projectDir contains session UUIDs as dirs or .jsonl files,
+      // plus a "subagents" dir that we must skip.
+      scanDir(projectDir, cutoff, files);
     }
   } catch {
     // CLAUDE_PROJECTS_DIR doesn't exist
   }
 
   return files;
+}
+
+function scanDir(dir: string, cutoff: Date, files: string[]): void {
+  try {
+    const entries = readdirSync(dir);
+    for (const entry of entries) {
+      // Skip subagents at any level
+      if (entry === "subagents") continue;
+
+      const fullPath = join(dir, entry);
+      try {
+        const st = statSync(fullPath);
+        if (st.isFile() && entry.endsWith(".jsonl") && st.mtime >= cutoff) {
+          files.push(fullPath);
+        } else if (st.isDirectory()) {
+          // Recurse one level into session UUID dirs (which may contain subagents/)
+          scanDir(fullPath, cutoff, files);
+        }
+      } catch {
+        // skip
+      }
+    }
+  } catch {
+    // skip unreadable dirs
+  }
 }

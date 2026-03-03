@@ -75,7 +75,7 @@ export const schemas = {
     query: z.string(),
     caller_id: z.string(),
     days: z.number().int().min(1).max(30).optional(),
-    project_id: z.string().optional(),
+    project_id: z.string().optional(), // used for auth check only
     limit: z.number().int().min(1).max(50).optional(),
     embedding: embeddingSchema,
   }),
@@ -251,14 +251,14 @@ export const toolDefinitions = [
   },
   {
     name: "session_recall",
-    description: "Search recent Claude Code session logs (short-term memory). Lazily indexes JSONL session files on first call, then performs hybrid search. Chunks auto-expire after the specified days.",
+    description: "Search recent Claude Code session logs (short-term memory). Lazily indexes JSONL session files on first call, then performs hybrid search. Chunks auto-expire after the specified days. Requires caller to be registered in the project.",
     inputSchema: {
       type: "object" as const,
       properties: {
         query: { type: "string", description: "Search query" },
-        caller_id: { type: "string", description: "Caller agent ID for permission checks" },
+        caller_id: { type: "string", description: "Caller agent ID (must be registered in project)" },
         days: { type: "number", description: "Number of days to search (default: 7, max: 30)" },
-        project_id: { type: "string", description: "Project ID (default: 'default')" },
+        project_id: { type: "string", description: "Project ID for auth check (default: 'default')" },
         limit: { type: "number", description: "Max results (default: 10, max: 50)" },
         embedding: { oneOf: [{ type: "boolean", const: true }, { type: "array", items: { type: "number" } }], description: "true = auto-generate query embedding for hybrid search" },
       },
@@ -475,8 +475,15 @@ export function createToolHandler(storage: Storage) {
 
         case "session_recall": {
           const input = schemas.session_recall.parse(args);
+          const projectId = input.project_id ?? DEFAULT_PROJECT;
           const days = input.days ?? 7;
           const limit = input.limit ?? 10;
+
+          // Auth: caller must be registered in the project
+          const role = getAgentRole(storage, projectId, input.caller_id);
+          if (!role) {
+            throw new AuthError(`Agent "${input.caller_id}" is not registered in project "${projectId}"`);
+          }
 
           // Lazy index: index new sessions before searching
           const indexResult = await indexNewSessions(storage, days);

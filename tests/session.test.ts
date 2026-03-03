@@ -70,7 +70,7 @@ describe("parseSessionFile", () => {
     expect(chunks[1].chunk_index).toBe(1);
   });
 
-  it("deduplicates assistant messages by message.id", () => {
+  it("deduplicates assistant messages by message.id (keeps last/complete)", () => {
     const filePath = join(TEST_DIR, "dedup-session.jsonl");
     const msgId = "msg-duplicate";
     const lines = [
@@ -98,9 +98,9 @@ describe("parseSessionFile", () => {
     writeFileSync(filePath, lines.join("\n") + "\n");
 
     const chunks = parseSessionFile(filePath);
-    // Only first occurrence kept — 1 turn
+    // Last occurrence kept (complete response, not partial)
     expect(chunks).toHaveLength(1);
-    expect(chunks[0].content).toContain("Partial...");
+    expect(chunks[0].content).toContain("Full response");
   });
 
   it("splits long turns into multiple chunks", () => {
@@ -185,6 +185,11 @@ describe("session_recall tool", () => {
     return JSON.parse(await handle(name, args));
   }
 
+  beforeEach(async () => {
+    // Register agent for auth
+    await handle("agent_register", { project_id: "default", agent_id: "claude-code", role: "manager" });
+  });
+
   it("returns results with index_stats", async () => {
     const result = await parse("session_recall", {
       query: "test query",
@@ -204,6 +209,15 @@ describe("session_recall tool", () => {
       limit: 5,
     });
     expect(result.ok).toBe(true);
+  });
+
+  it("rejects unregistered caller", async () => {
+    const result = await parse("session_recall", {
+      query: "test",
+      caller_id: "unknown-agent",
+    });
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("not registered");
   });
 
   it("rejects invalid days", async () => {
