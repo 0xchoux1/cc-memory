@@ -4,6 +4,7 @@ import type { Storage } from "./storage.js";
 import { checkStorePermission, checkReadPermission, getAgentRole, AuthError } from "./auth.js";
 import { embed, DIMENSIONS } from "./embeddings.js";
 import { analyzeMemories, executeCuration } from "./curate.js";
+import { indexNewSessions, searchChunks } from "./session.js";
 
 const DEFAULT_PROJECT = "default";
 
@@ -69,6 +70,14 @@ export const schemas = {
     scope: z.enum(["shared", "personal"]).optional(),
     threshold: z.number().min(0).max(1).optional(),
     dry_run: z.boolean().optional(),
+  }),
+  session_recall: z.object({
+    query: z.string(),
+    caller_id: z.string(),
+    days: z.number().int().min(1).max(30).optional(),
+    project_id: z.string().optional(),
+    limit: z.number().int().min(1).max(50).optional(),
+    embedding: embeddingSchema,
   }),
 };
 
@@ -238,6 +247,22 @@ export const toolDefinitions = [
         dry_run: { type: "boolean", description: "If true, report only without deleting (default: true)" },
       },
       required: ["caller_id"],
+    },
+  },
+  {
+    name: "session_recall",
+    description: "Search recent Claude Code session logs (short-term memory). Lazily indexes JSONL session files on first call, then performs hybrid search. Chunks auto-expire after the specified days.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        query: { type: "string", description: "Search query" },
+        caller_id: { type: "string", description: "Caller agent ID for permission checks" },
+        days: { type: "number", description: "Number of days to search (default: 7, max: 30)" },
+        project_id: { type: "string", description: "Project ID (default: 'default')" },
+        limit: { type: "number", description: "Max results (default: 10, max: 50)" },
+        embedding: { oneOf: [{ type: "boolean", const: true }, { type: "array", items: { type: "number" } }], description: "true = auto-generate query embedding for hybrid search" },
+      },
+      required: ["query", "caller_id"],
     },
   },
 ];
@@ -445,6 +470,37 @@ export function createToolHandler(storage: Storage) {
             would_delete: report.duplicates.reduce((n, g) => n + g.duplicates.length, 0),
             stale_count: report.stale.length,
             report,
+          });
+        }
+
+        case "session_recall": {
+          const input = schemas.session_recall.parse(args);
+          const days = input.days ?? 7;
+          const limit = input.limit ?? 10;
+
+          // Lazy index: index new sessions before searching
+          const indexResult = await indexNewSessions(storage, days);
+
+          // Resolve query embedding
+          const queryEmbedding = await resolveQueryEmbedding(input.embedding, input.query);
+
+          const chunks = await searchChunks(storage, input.query, {
+            days,
+            limit,
+            queryEmbedding,
+          });
+
+          return JSON.stringify({
+            ok: true,
+            count: chunks.length,
+            index_stats: indexResult,
+            chunks: chunks.map((c) => ({
+              session_id: c.session_id,
+              project_path: c.project_path,
+              chunk_index: c.chunk_index,
+              content: c.content,
+              timestamp: c.timestamp,
+            })),
           });
         }
 

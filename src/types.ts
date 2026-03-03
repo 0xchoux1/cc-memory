@@ -1,4 +1,4 @@
-// cc-memory v2 types
+// cc-memory v3 types
 
 export type Scope = "shared" | "personal";
 export type Role = "manager" | "worker";
@@ -26,4 +26,14 @@ export interface Agent {
   agent_id: string;
   role: Role;
   created_at: string;
+}
+
+export interface SessionChunk {
+  id: string;
+  session_id: string;
+  project_path: string;
+  chunk_index: number;
+  content: string;
+  timestamp: string;
+  indexed_at: string;
 }

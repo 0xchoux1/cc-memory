@@ -2,7 +2,7 @@
 import Database from "better-sqlite3";
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
-import type { Memory, Project, Agent, Scope, Role } from "./types.js";
+import type { Memory, Project, Agent, SessionChunk, Scope, Role } from "./types.js";
 import { DIMENSIONS } from "./embeddings.js";
 
 const require = createRequire(import.meta.url);
@@ -39,10 +39,31 @@ CREATE INDEX IF NOT EXISTS idx_memories_scope ON memories(scope);
 CREATE INDEX IF NOT EXISTS idx_memories_agent ON memories(agent_id);
 `;
 
+const SESSION_SCHEMA = `
+CREATE TABLE IF NOT EXISTS session_chunks (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  project_path TEXT NOT NULL,
+  chunk_index INTEGER NOT NULL,
+  content TEXT NOT NULL,
+  timestamp TEXT NOT NULL,
+  indexed_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_session_chunks_session ON session_chunks(session_id);
+CREATE INDEX IF NOT EXISTS idx_session_chunks_timestamp ON session_chunks(timestamp);
+`;
+
 const VEC_SCHEMA = `
 CREATE VIRTUAL TABLE IF NOT EXISTS vec_memories USING vec0(
   memory_id TEXT PRIMARY KEY,
   project_id TEXT PARTITION KEY,
+  embedding float[${DIMENSIONS}] distance_metric=cosine
+);
+`;
+
+const VEC_SESSION_SCHEMA = `
+CREATE VIRTUAL TABLE IF NOT EXISTS vec_session_chunks USING vec0(
+  chunk_id TEXT PRIMARY KEY,
   embedding float[${DIMENSIONS}] distance_metric=cosine
 );
 `;
@@ -61,6 +82,7 @@ export class Storage {
     this.db.pragma("journal_mode = WAL");
     this.db.pragma("foreign_keys = ON");
     this.db.exec(SCHEMA);
+    this.db.exec(SESSION_SCHEMA);
     this.migrateCreatedBy();
     this.ensureDefaultProject();
     this.initVectorSearch();
@@ -71,6 +93,7 @@ export class Storage {
       const sqliteVec = require("sqlite-vec");
       sqliteVec.load(this.db);
       this.db.exec(VEC_SCHEMA);
+      this.db.exec(VEC_SESSION_SCHEMA);
       this.vectorEnabled = true;
     } catch {
       this.vectorEnabled = false;
@@ -389,6 +412,112 @@ export class Storage {
     return result.changes > 0;
   }
 
+  // Session chunks
+  storeSessionChunk(chunk: SessionChunk, embedding?: Float32Array): void {
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO session_chunks (id, session_id, project_path, chunk_index, content, timestamp, indexed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(chunk.id, chunk.session_id, chunk.project_path, chunk.chunk_index, chunk.content, chunk.timestamp, chunk.indexed_at);
+    if (embedding && this.vectorEnabled) {
+      const buf = Buffer.from(embedding.buffer, embedding.byteOffset, embedding.byteLength);
+      this.db
+        .prepare("INSERT OR IGNORE INTO vec_session_chunks (chunk_id, embedding) VALUES (?, ?)")
+        .run(chunk.id, buf);
+    }
+  }
+
+  getIndexedSessionIds(): Set<string> {
+    const rows = this.db
+      .prepare("SELECT DISTINCT session_id FROM session_chunks")
+      .all() as Array<{ session_id: string }>;
+    return new Set(rows.map((r) => r.session_id));
+  }
+
+  deleteExpiredChunks(beforeDate: string): number {
+    // Delete vectors first, then chunks
+    if (this.vectorEnabled) {
+      const ids = this.db
+        .prepare("SELECT id FROM session_chunks WHERE timestamp < ?")
+        .all(beforeDate) as Array<{ id: string }>;
+      if (ids.length > 0) {
+        const placeholders = ids.map(() => "?").join(",");
+        this.db.prepare(`DELETE FROM vec_session_chunks WHERE chunk_id IN (${placeholders})`).run(...ids.map((r) => r.id));
+      }
+    }
+    const result = this.db.prepare("DELETE FROM session_chunks WHERE timestamp < ?").run(beforeDate);
+    return result.changes;
+  }
+
+  searchSessionChunks(
+    queryEmbedding: Float32Array | undefined,
+    query: string,
+    limit: number
+  ): SessionChunk[] {
+    if (!this.vectorEnabled || !queryEmbedding || queryEmbedding.length === 0) {
+      return this.keywordSearchChunks(query, limit);
+    }
+
+    const buf = Buffer.from(queryEmbedding.buffer, queryEmbedding.byteOffset, queryEmbedding.byteLength);
+    const vecResults = this.db
+      .prepare("SELECT chunk_id, distance FROM vec_session_chunks WHERE embedding MATCH ? ORDER BY distance LIMIT ?")
+      .all(buf, limit * 3) as Array<{ chunk_id: string; distance: number }>;
+    const vecMap = new Map(vecResults.map((r) => [r.chunk_id, r.distance]));
+
+    const keywordResults = this.keywordSearchChunks(query, limit * 3);
+    const keywordMap = new Map(keywordResults.map((c) => [c.id, c]));
+
+    // Merge all candidate IDs
+    const allIds = new Set([...vecMap.keys(), ...keywordMap.keys()]);
+    const now = Date.now();
+    const scored: Array<{ chunk: SessionChunk; score: number }> = [];
+
+    for (const id of allIds) {
+      let chunk = keywordMap.get(id);
+      if (!chunk) {
+        const row = this.db.prepare("SELECT * FROM session_chunks WHERE id = ?").get(id) as SessionChunk | undefined;
+        if (!row) continue;
+        chunk = row;
+      }
+
+      const vecDistance = vecMap.get(id);
+      const vecScore = vecDistance !== undefined ? (1 - vecDistance) : 0;
+      const tScore = chunkTextScore(chunk.content, query);
+
+      // Stronger time decay for short-term memory: ~8.6% per day
+      const ageMs = now - new Date(chunk.timestamp).getTime();
+      const decay = Math.exp(-1e-9 * ageMs);
+
+      const finalScore = (VECTOR_WEIGHT * vecScore + TEXT_WEIGHT * tScore) * decay;
+      scored.push({ chunk, score: finalScore });
+    }
+
+    return scored
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit)
+      .map((s) => s.chunk);
+  }
+
+  private keywordSearchChunks(query: string, limit: number): SessionChunk[] {
+    const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+    if (terms.length === 0) return [];
+
+    let sql = "SELECT * FROM session_chunks WHERE 1=1";
+    const params: unknown[] = [];
+
+    const likeClauses = terms.map(() => "content LIKE ? ESCAPE '\\'");
+    sql += " AND (" + likeClauses.join(" OR ") + ")";
+    for (const term of terms) {
+      const escaped = term.replace(/%/g, "\\%").replace(/_/g, "\\_");
+      params.push(`%${escaped}%`);
+    }
+
+    sql += " ORDER BY timestamp DESC LIMIT ?";
+    params.push(limit);
+    return this.db.prepare(sql).all(...params) as SessionChunk[];
+  }
+
   close(): void {
     this.db.close();
   }
@@ -439,4 +568,15 @@ function searchAndRank(memories: Memory[], query: string, limit: number): Memory
     .sort((a, b) => b.score - a.score)
     .slice(0, limit)
     .map((s) => s.memory);
+}
+
+function chunkTextScore(content: string, query: string): number {
+  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (terms.length === 0) return 0;
+  const text = content.toLowerCase();
+  let matched = 0;
+  for (const term of terms) {
+    if (text.includes(term)) matched++;
+  }
+  return matched / terms.length;
 }
