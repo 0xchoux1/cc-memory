@@ -44,7 +44,8 @@ Personal Scope（個人層）← 本人のみ読み書き
 - **MCP 対応** — Claude Code やその他 MCP クライアントからそのまま使える
 - **SQLite** — ローカル保存、クラウド不要、プライバシー重視
 - **ハイブリッド検索** — sqlite-vec によるベクトル検索 + キーワード検索のハイブリッド（v3）
-- **8 API endpoints** — シンプルで必要十分な API セット
+- **短期記憶** — セッションJSONLの自動インデックス + ハイブリッド検索（v3.2）
+- **9 API endpoints** — シンプルで必要十分な API セット
 
 ---
 
@@ -89,6 +90,12 @@ cc-memory setup
 | `memory_update` | メモリ内容・タグを更新。オーナーまたは manager のみ。`embedding: true` で再ベクトル化 |
 | `memory_delete` | メモリを削除。オーナーまたは manager のみ |
 | `memory_curate` | 重複・古いメモリを検出・削除。`dry_run: true`（デフォルト）でレポートのみ |
+
+### セッション検索（1 本）
+
+| ツール | 説明 |
+|--------|------|
+| `session_recall` | 直近セッションログ（短期記憶）をハイブリッド検索。初回呼び出し時にJSONLを自動インデックス |
 
 ### プロジェクト管理（2 本）
 
@@ -208,6 +215,23 @@ cc-memory setup
 | パラメータ | 型 | 必須 | 説明 |
 |-----------|------|------|------|
 | `project_id` | `string` | ✅ | プロジェクト ID |
+
+</details>
+
+<details>
+<summary><code>session_recall</code></summary>
+
+| パラメータ | 型 | 必須 | 説明 |
+|-----------|------|------|------|
+| `query` | `string` | ✅ | 検索クエリ |
+| `caller_id` | `string` | ✅ | 呼び出し元エージェント ID |
+| `days` | `number` | - | 対象日数（1-30、デフォルト: 7） |
+| `project_id` | `string` | - | プロジェクト ID（認可チェック用。セッションの検索絞り込みには使用されません） |
+| `limit` | `number` | - | 最大件数（1-50、デフォルト: 10） |
+| `embedding` | `boolean` | - | `true` でハイブリッド検索 |
+
+> 初回呼び出し時に `~/.claude/projects/` 配下の JSONL セッションファイルを自動でインデックスします。
+> 対象期間を超えた古いチャンクは自動削除されます。
 
 </details>
 
@@ -406,7 +430,8 @@ A memory server for multi-agent development that separates **shared knowledge** 
 - **MCP compatible** — works with Claude Code and any MCP client
 - **SQLite** — local storage, no cloud, privacy-first
 - **Hybrid search** — sqlite-vec vector search + keyword search (v3)
-- **8 API endpoints** — simple and sufficient
+- **Short-term memory** — auto-indexes JSONL session logs with hybrid search (v3.2)
+- **9 API endpoints** — simple and sufficient
 
 ### Quick Start
 
@@ -431,6 +456,7 @@ Add to `~/.claude/settings.json`:
 ### API
 
 **Memory:** `memory_store`, `memory_recall`, `memory_list`, `memory_update`, `memory_delete`, `memory_curate`
+**Session:** `session_recall`
 **Projects:** `project_create`, `project_list`
 **Agents:** `agent_register`, `agent_list`
 

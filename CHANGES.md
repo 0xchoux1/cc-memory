@@ -1,5 +1,28 @@
 # Changelog
 
+## v3.2.0
+
+### Short-term Memory: `session_recall` ツール
+
+**新機能:**
+- `session_recall` ツール追加 — Claude Code セッション JSONL を自動インデックス + ハイブリッド検索
+  - `~/.claude/projects/**/*.jsonl` を対象期間（デフォルト7日）で自動スキャン
+  - 会話ターン（user + assistant ペア）単位でチャンク化
+  - 2000文字超のターンは自動分割
+  - 既存 hybrid search（vector 70% + keyword 30%）を再利用、短期記憶向けの強めの時間減衰
+  - 対象期間外のチャンクを呼び出し時に自動削除
+  - lazy indexing: 初回 `session_recall` 呼び出し時に未インデックスのセッションを検出→インデックス構築
+  - subagents ディレクトリは自動除外
+  - assistant のストリーミング重複を message.id で自動デデュプ
+
+**新テーブル:**
+- `session_chunks` — セッションチャンクの保存（id, session_id, project_path, chunk_index, content, timestamp, indexed_at）
+- `vec_session_chunks` — チャンクのベクトル埋め込み（sqlite-vec）
+
+**ファイル追加:**
+- `src/session.ts` — JSONL パース、チャンク化、インデックス、検索
+- `tests/session.test.ts` — チャンク化・インデックス・検索テスト
+
 ## v3.1.0
 
 ### Autonomous Memory Skills (PR #10, #12)
