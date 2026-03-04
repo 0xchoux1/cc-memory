@@ -2,7 +2,6 @@
 
 ## Now (next up)
 - [ ] session_recall のパフォーマンス最適化 — 大量セッション時のインデックス速度改善
-- [ ] session_recall の project_path フィルタ — 特定プロジェクトのセッションのみ検索
 
 ## Next
 - [ ] メモリの重要度スコアリング — recall 結果のランキング改善

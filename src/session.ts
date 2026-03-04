@@ -120,11 +120,11 @@ export async function indexNewSessions(
 export async function searchChunks(
   storage: Storage,
   query: string,
-  opts: { days?: number; limit?: number; queryEmbedding?: Float32Array }
+  opts: { days?: number; limit?: number; queryEmbedding?: Float32Array; projectPath?: string }
 ): Promise<SessionChunk[]> {
-  const { limit = 10, queryEmbedding } = opts;
+  const { limit = 10, queryEmbedding, projectPath } = opts;
 
-  return storage.searchSessionChunks(queryEmbedding, query, limit);
+  return storage.searchSessionChunks(queryEmbedding, query, limit, projectPath);
 }
 
 // --- Internal helpers ---

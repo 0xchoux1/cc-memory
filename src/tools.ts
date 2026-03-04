@@ -76,6 +76,7 @@ export const schemas = {
     caller_id: z.string(),
     days: z.number().int().min(1).max(30).optional(),
     project_id: z.string().optional(), // used for auth check only
+    project_path: z.string().optional(), // filter by project path (e.g. "-home-user-myproject")
     limit: z.number().int().min(1).max(50).optional(),
     embedding: embeddingSchema,
   }),
@@ -259,6 +260,7 @@ export const toolDefinitions = [
         caller_id: { type: "string", description: "Caller agent ID (must be registered in project)" },
         days: { type: "number", description: "Number of days to search (default: 7, max: 30)" },
         project_id: { type: "string", description: "Project ID for auth check (default: 'default')" },
+        project_path: { type: "string", description: "Filter by project path (e.g. '-home-user-myproject'). Omit to search all projects." },
         limit: { type: "number", description: "Max results (default: 10, max: 50)" },
         embedding: { oneOf: [{ type: "boolean", const: true }, { type: "array", items: { type: "number" } }], description: "true = auto-generate query embedding for hybrid search" },
       },
@@ -495,6 +497,7 @@ export function createToolHandler(storage: Storage) {
             days,
             limit,
             queryEmbedding,
+            projectPath: input.project_path,
           });
 
           return JSON.stringify({

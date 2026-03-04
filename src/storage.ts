@@ -453,10 +453,11 @@ export class Storage {
   searchSessionChunks(
     queryEmbedding: Float32Array | undefined,
     query: string,
-    limit: number
+    limit: number,
+    projectPath?: string
   ): SessionChunk[] {
     if (!this.vectorEnabled || !queryEmbedding || queryEmbedding.length === 0) {
-      return this.keywordSearchChunks(query, limit);
+      return this.keywordSearchChunks(query, limit, projectPath);
     }
 
     const buf = Buffer.from(queryEmbedding.buffer, queryEmbedding.byteOffset, queryEmbedding.byteLength);
@@ -465,7 +466,7 @@ export class Storage {
       .all(buf, limit * 3) as Array<{ chunk_id: string; distance: number }>;
     const vecMap = new Map(vecResults.map((r) => [r.chunk_id, r.distance]));
 
-    const keywordResults = this.keywordSearchChunks(query, limit * 3);
+    const keywordResults = this.keywordSearchChunks(query, limit * 3, projectPath);
     const keywordMap = new Map(keywordResults.map((c) => [c.id, c]));
 
     // Merge all candidate IDs
@@ -480,6 +481,9 @@ export class Storage {
         if (!row) continue;
         chunk = row;
       }
+
+      // Apply project_path filter for vec-only results
+      if (projectPath && chunk.project_path !== projectPath) continue;
 
       const vecDistance = vecMap.get(id);
       const vecScore = vecDistance !== undefined ? (1 - vecDistance) : 0;
@@ -499,12 +503,17 @@ export class Storage {
       .map((s) => s.chunk);
   }
 
-  private keywordSearchChunks(query: string, limit: number): SessionChunk[] {
+  private keywordSearchChunks(query: string, limit: number, projectPath?: string): SessionChunk[] {
     const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
     if (terms.length === 0) return [];
 
     let sql = "SELECT * FROM session_chunks WHERE 1=1";
     const params: unknown[] = [];
+
+    if (projectPath) {
+      sql += " AND project_path = ?";
+      params.push(projectPath);
+    }
 
     const likeClauses = terms.map(() => "content LIKE ? ESCAPE '\\'");
     sql += " AND (" + likeClauses.join(" OR ") + ")";

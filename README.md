@@ -227,6 +227,7 @@ cc-memory setup
 | `caller_id` | `string` | ✅ | 呼び出し元エージェント ID |
 | `days` | `number` | - | 対象日数（1-30、デフォルト: 7） |
 | `project_id` | `string` | - | プロジェクト ID（認可チェック用。セッションの検索絞り込みには使用されません） |
+| `project_path` | `string` | - | プロジェクトパスでフィルタ（例: `-home-user-myproject`）。省略時は全プロジェクト対象 |
 | `limit` | `number` | - | 最大件数（1-50、デフォルト: 10） |
 | `embedding` | `boolean` | - | `true` でハイブリッド検索 |
 
