@@ -325,4 +325,26 @@ describe("Storage session_chunks", () => {
     expect(results.length).toBeGreaterThanOrEqual(1);
     expect(results[0].content).toContain("TypeScript");
   });
+
+  it("filters by project_path", () => {
+    storage.storeSessionChunk({
+      id: "a:0", session_id: "a", project_path: "-home-user-project-alpha",
+      chunk_index: 0, content: "Alpha project setup with Rust",
+      timestamp: new Date().toISOString(), indexed_at: new Date().toISOString(),
+    });
+    storage.storeSessionChunk({
+      id: "b:0", session_id: "b", project_path: "-home-user-project-beta",
+      chunk_index: 0, content: "Beta project setup with Rust",
+      timestamp: new Date().toISOString(), indexed_at: new Date().toISOString(),
+    });
+
+    // With filter: only alpha
+    const alpha = storage.searchSessionChunks(new Float32Array(0), "Rust", 10, "-home-user-project-alpha");
+    expect(alpha.length).toBe(1);
+    expect(alpha[0].project_path).toBe("-home-user-project-alpha");
+
+    // Without filter: both
+    const all = storage.searchSessionChunks(new Float32Array(0), "Rust", 10);
+    expect(all.length).toBe(2);
+  });
 });

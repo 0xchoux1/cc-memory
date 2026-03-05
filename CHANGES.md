@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- `session_recall` に `project_path` フィルタを追加 — 特定プロジェクトのセッションのみに絞り込み検索可能
+
 ## v3.2.0
 
 ### Short-term Memory: `session_recall` ツール
