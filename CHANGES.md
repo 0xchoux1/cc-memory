@@ -12,6 +12,9 @@
   - Deprecated → Current コマンドマッピング表を追加
   - CLI コマンド一覧に `serve` を追加
 - `docs/QUICKSTART.md` 追加 — 5分で最初の recall まで到達するガイド
+- Safe defaults: `project_id` は省略時 `"default"` を適用、`caller_id`/`agent_id` は `CC_MEMORY_DEFAULT_AGENT` env で設定可
+- デフォルト適用時にレスポンスの `defaults_applied` フィールドで透明性を確保
+- `caller_id` / `agent_id` を MCP スキーマで optional に変更（env 設定時は省略可能）
 
 ## v3.2.0
 

@@ -319,6 +319,7 @@ cc-memory migrate-embeddings  # 既存メモリにベクトル埋め込みを一
 | 変数 | デフォルト | 説明 |
 |------|-----------|------|
 | `CC_MEMORY_DB` | `cc-memory.db` | SQLite データベースのパス |
+| `CC_MEMORY_DEFAULT_AGENT` | なし | `caller_id` / `agent_id` 省略時のデフォルトエージェント ID |
 
 ### Claude Code 設定
 
@@ -327,11 +328,40 @@ cc-memory migrate-embeddings  # 既存メモリにベクトル埋め込みを一
   "mcpServers": {
     "cc-memory": {
       "command": "cc-memory",
-      "args": ["serve"]
+      "args": ["serve"],
+      "env": {
+        "CC_MEMORY_DEFAULT_AGENT": "my-agent"
+      }
     }
   }
 }
 ```
+
+### Defaults & Overrides
+
+cc-memory は初期設定の手間を減らすために、以下のデフォルト値を提供します。
+
+| パラメータ | デフォルト値 | ソース |
+|-----------|-------------|--------|
+| `project_id` | `"default"` | ハードコード |
+| `caller_id` / `agent_id` | なし（省略でエラー） | `CC_MEMORY_DEFAULT_AGENT` 環境変数で設定可 |
+
+**透明性:** デフォルト値が適用された場合、レスポンスに `defaults_applied` フィールドが含まれます。
+
+```json
+{
+  "ok": true,
+  "memory": { "..." },
+  "defaults_applied": {
+    "project_id": "default",
+    "agent_id": "my-agent"
+  }
+}
+```
+
+**オーバーライド:** 明示的にパラメータを指定した場合、デフォルトは適用されません。`defaults_applied` にも表示されません。
+
+> **注意:** `CC_MEMORY_DEFAULT_AGENT` はシングルユーザー / 小規模用途向けです。マルチエージェント環境では `caller_id` が固定されると RBAC の意味がなくなるため、各ツール呼び出しで明示的に `caller_id` / `agent_id` を指定してください。
 
 ---
 
