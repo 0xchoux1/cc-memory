@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v3.3.0
+
 - `session_recall` に `project_path` フィルタを追加 — 特定プロジェクトのセッションのみに絞り込み検索可能
 - CLI に `serve` コマンドを追加 — MCP サーバーを `cc-memory serve` で起動可能に
 - README / docs を v3.2.0 の実態に合わせて修正:
