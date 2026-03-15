@@ -54,17 +54,31 @@ Personal Scope（個人層）← 本人のみ読み書き
 
 ## インストール & セットアップ
 
-```bash
-# グローバルインストール
-npm install -g cc-memory
-
-# データベース初期化
-cc-memory setup
-```
-
 ### Claude Code で使う
 
 `~/.claude/settings.json` に以下を追加:
+
+```json
+{
+  "mcpServers": {
+    "cc-memory": {
+      "command": "npx",
+      "args": ["-y", "cc-memory", "serve"]
+    }
+  }
+}
+```
+
+グローバルインストール不要。npx が自動でパッケージを取得・キャッシュし、新バージョンがあれば自動更新されます。
+
+> 初回起動時に DB ファイルが自動作成されます。デフォルトパスは `./cc-memory.db`（環境変数 `CC_MEMORY_DB` で変更可）。
+
+<details>
+<summary>グローバルインストールで使う場合</summary>
+
+```bash
+npm install -g cc-memory
+```
 
 ```json
 {
@@ -77,7 +91,9 @@ cc-memory setup
 }
 ```
 
-> `cc-memory setup` を実行すると DB ファイルが作成されます。デフォルトパスは `./cc-memory.db`（環境変数 `CC_MEMORY_DB` で変更可）。
+更新は `npm update -g cc-memory` で手動実行。
+
+</details>
 
 ---
 
@@ -328,8 +344,8 @@ cc-memory migrate-embeddings  # 既存メモリにベクトル埋め込みを一
 {
   "mcpServers": {
     "cc-memory": {
-      "command": "cc-memory",
-      "args": ["serve"],
+      "command": "npx",
+      "args": ["-y", "cc-memory", "serve"],
       "env": {
         "CC_MEMORY_DEFAULT_AGENT": "my-agent"
       }
@@ -470,19 +486,14 @@ A memory server for multi-agent development that separates **shared knowledge** 
 
 ### Quick Start
 
-```bash
-npm install -g cc-memory
-cc-memory setup
-```
-
 Add to `~/.claude/settings.json`:
 
 ```json
 {
   "mcpServers": {
     "cc-memory": {
-      "command": "cc-memory",
-      "args": ["serve"]
+      "command": "npx",
+      "args": ["-y", "cc-memory", "serve"]
     }
   }
 }
