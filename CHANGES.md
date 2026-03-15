@@ -3,6 +3,14 @@
 ## Unreleased
 
 - `session_recall` に `project_path` フィルタを追加 — 特定プロジェクトのセッションのみに絞り込み検索可能
+- CLI に `serve` コマンドを追加 — MCP サーバーを `cc-memory serve` で起動可能に
+- README / docs を v3.2.0 の実態に合わせて修正:
+  - "9 API endpoints" → "11 MCP tools"
+  - v1→v2 移行表の "8 ツール" → "11 ツール"
+  - docs/MULTI_AGENT.md を v3 アーキテクチャに全面書き換え
+  - docs/agent-manager-architecture.md を v3 に全面書き換え
+  - Deprecated → Current コマンドマッピング表を追加
+  - CLI コマンド一覧に `serve` を追加
 
 ## v3.2.0
 

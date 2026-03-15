@@ -1,161 +1,80 @@
 # Agent Manager Architecture
 
+> Validated with cc-memory v3.2.0
+
 ## 概要
 
+cc-memory はマルチエージェント環境でのメモリ管理を提供する MCP サーバーです。
+Manager-Worker モデルにより、共有知識の一貫性と個別知識の専門性を両立します。
+
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        Human Interface                       │
-│  "売上レポートを作成して" → Agent Manager → "完了しました"    │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                       Agent Manager                          │
-│                                                              │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
-│  │ Task Planner│  │ Orchestrator│  │  Reporter   │         │
-│  │ (タスク分解) │  │ (実行管理)  │  │ (進捗報告)  │         │
-│  └─────────────┘  └─────────────┘  └─────────────┘         │
-└─────────────────────────────────────────────────────────────┘
-          │                  │                  │
-          ▼                  ▼                  ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    Shared Memory (cc-memory)                 │
-│                                                              │
-│  Working Memory │ Episodic Memory │ Semantic Memory         │
-│  (実行状態)      │ (タスク履歴)     │ (学習した知識)          │
-└─────────────────────────────────────────────────────────────┘
-          │                  │                  │
-          ▼                  ▼                  ▼
-┌─────────────────────────────────────────────────────────────┐
-│                      Worker Agents                           │
-│                                                              │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐   │
-│  │ Research │  │  Coder   │  │ Reviewer │  │ Reporter │   │
-│  │  Agent   │  │  Agent   │  │  Agent   │  │  Agent   │   │
-│  └──────────┘  └──────────┘  └──────────┘  └──────────┘   │
-│       │              │             │             │          │
-│       └──────────────┴─────────────┴─────────────┘          │
-│                         │                                    │
-│                   Tachikoma Sync                             │
-│                 (エージェント間同期)                          │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────┐
+│                 Claude Code                      │
+│          (MCP クライアント)                       │
+└───────────────────┬─────────────────────────────┘
+                    │ stdio
+┌───────────────────┴─────────────────────────────┐
+│              cc-memory MCP Server                │
+│                                                  │
+│  ┌────────────┐  ┌────────────┐  ┌───────────┐  │
+│  │ Memory Ops │  │ Session    │  │ Project & │  │
+│  │ (6 tools)  │  │ (1 tool)   │  │ Agent Mgmt│  │
+│  │            │  │            │  │ (4 tools)  │  │
+│  └──────┬─────┘  └──────┬─────┘  └─────┬─────┘  │
+│         └───────────────┼───────────────┘        │
+│                         │                        │
+│              ┌──────────┴──────────┐             │
+│              │   SQLite + sqlite-vec│             │
+│              │   (ローカル永続化)    │             │
+│              └─────────────────────┘             │
+└─────────────────────────────────────────────────┘
 ```
 
-## フロー例: "売上レポートを作成して"
+## ロール設計
 
-### Step 1: Task Planner がタスク分解
-```
-Goal: 売上レポート作成
-  ├─ Task 1: データ収集 (Research Agent)
-  ├─ Task 2: 分析スクリプト作成 (Coder Agent)
-  ├─ Task 3: 分析実行 (Coder Agent)
-  ├─ Task 4: レビュー (Reviewer Agent)
-  └─ Task 5: レポート生成 (Reporter Agent)
-```
+### Manager
+- **Shared Scope** の読み書き権限
+- **全 Worker の Personal Scope** の読み取り権限
+- プロジェクト全体の知識を管理・統括
 
-### Step 2: Orchestrator がワークフロー作成
-```typescript
-const workflow = {
-  name: "Sales Report Generation",
-  steps: [
-    { name: "collect_data", agent: "research", agentRole: "data" },
-    { name: "create_script", agent: "coder", agentRole: "backend", dependsOn: ["collect_data"] },
-    { name: "run_analysis", agent: "coder", agentRole: "backend", dependsOn: ["create_script"] },
-    { name: "review", agent: "reviewer", agentRole: "security", dependsOn: ["run_analysis"] },
-    { name: "generate_report", agent: "reporter", dependsOn: ["review"] },
-  ]
-};
+### Worker
+- **Shared Scope** の読み取りのみ
+- **自分の Personal Scope** の読み書き
+- 専門知識・作業ログを蓄積
+
+## 利用パターン
+
+### パターン 1: 知識の共有と参照
+
+```
+Manager: 規約を shared に保存
+  → Worker A: shared を参照して作業
+  → Worker B: shared を参照して作業
 ```
 
-### Step 3: 各 Agent が自律実行
-- 各エージェントは Claude API を呼び出して実際の作業を行う
-- 結果は共有メモリに保存
-- 次のエージェントは前のエージェントの出力を参照
+### パターン 2: 作業ログの蓄積と監視
 
-### Step 4: Reporter が人間に報告
 ```
-"売上レポートが完了しました。
-- データ: 1000件のトランザクションを分析
-- 主要な発見: 前月比15%増
-- レポート: /reports/sales-2024-01.pdf"
+Worker A: 作業結果を personal に記録
+Worker B: 作業結果を personal に記録
+  → Manager: 全 worker の personal を recall で確認
 ```
 
-## 実装計画
+### パターン 3: 短期記憶の活用
 
-### Phase A: Worker Agent 基盤
-```typescript
-interface WorkerAgent {
-  id: string;
-  role: AgentRole;
-  capabilities: string[];
-
-  // Claude API を使って実際にタスクを実行
-  execute(task: DurableTask, context: SharedContext): Promise<TaskResult>;
-
-  // 他エージェントの結果を読み取る
-  readSharedMemory(key: string): Promise<unknown>;
-
-  // 結果を共有メモリに書き込む
-  writeSharedMemory(key: string, value: unknown): Promise<void>;
-}
+```
+session_recall で直近のセッションログを検索
+  → 前回の会話内容・決定事項を即座に参照
 ```
 
-### Phase B: Agent Manager
-```typescript
-interface AgentManager {
-  // 人間からの指示を受け取る
-  receiveInstruction(instruction: string): Promise<void>;
+## v1 からの変更点
 
-  // タスクを分解してワークフロー作成
-  planWorkflow(goal: string): Promise<WorkflowDefinition>;
+| 項目 | v1 | v3 |
+|------|---|---|
+| メモリモデル | Working / Episodic / Semantic | Shared / Personal |
+| ロール | Manager / Worker / Observer | Manager / Worker |
+| 通信 | HTTP + WebSocket | stdio MCP |
+| 同期 | Tachikoma / CRDT | なし（ローカル完結） |
+| 認証 | API キー | RBAC（DB 内） |
 
-  // ワークフロー実行を監視
-  monitorExecution(workflowId: string): AsyncIterable<ProgressUpdate>;
-
-  // 人間に報告
-  reportToHuman(summary: string): Promise<void>;
-
-  // 人間の判断が必要な時に質問
-  askHuman(question: string, options?: string[]): Promise<string>;
-}
-```
-
-### Phase C: Human Interface
-```typescript
-// CLI での対話例
-$ cc-agent "売上レポートを作成して"
-
-Agent Manager: タスクを分解しています...
-  ✓ データ収集 (Research Agent)
-  ✓ 分析スクリプト作成 (Coder Agent)
-  → 分析実行中... (Coder Agent)
-  ○ レビュー待ち (Reviewer Agent)
-  ○ レポート生成待ち (Reporter Agent)
-
-Agent Manager: 分析が完了しました。レビューを進めますか? [Y/n]
-```
-
-## 技術的な実現方法
-
-### Option 1: Claude API + cc-memory
-- 各 Worker Agent は Claude API を呼び出す
-- cc-memory で状態管理・同期
-- Agent Manager も Claude で実装
-
-### Option 2: Claude Code 複数インスタンス
-- 複数の Claude Code プロセスを起動
-- Tachikoma で同期
-- 1つを Manager、他を Worker として役割分担
-
-### Option 3: MCP Server として
-- cc-memory を MCP Server として起動
-- 複数のクライアント(Claude Desktop等)が接続
-- 共有メモリ経由で協調
-
-## 次のステップ
-
-1. **WorkerAgent クラスの実装** - Claude API を呼び出す基盤
-2. **AgentManager の実装** - タスク分解と監視ロジック
-3. **CLI Interface** - 人間との対話UI
-4. **実験** - 実際のタスクで動作確認
+v1 のコードは [`v1` ブランチ](https://github.com/0xchoux1/cc-memory/tree/v1) で保全されています。
