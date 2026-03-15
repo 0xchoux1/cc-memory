@@ -2,6 +2,22 @@
 
 > cc-memory v3.2.0 — インストールから最初の recall まで 5 分以内
 
+## TL;DR — 最短3コマンド
+
+```bash
+npm install -g cc-memory && cc-memory setup
+```
+
+Claude Code で:
+```
+memory_store を実行: scope="shared", agent_id="me", content="Hello cc-memory!", project_id="default"
+memory_recall を実行: scope="shared", query="Hello", caller_id="me", project_id="default"
+```
+
+ここまでで動作確認完了。詳細は以下のステップで。
+
+---
+
 ## Step 1: インストール（1分）
 
 ```bash
