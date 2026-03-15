@@ -45,7 +45,7 @@ Personal Scope（個人層）← 本人のみ読み書き
 - **SQLite** — ローカル保存、クラウド不要、プライバシー重視
 - **ハイブリッド検索** — sqlite-vec によるベクトル検索 + キーワード検索のハイブリッド（v3）
 - **短期記憶** — セッションJSONLの自動インデックス + ハイブリッド検索（v3.2）
-- **9 API endpoints** — シンプルで必要十分な API セット
+- **11 MCP tools** — シンプルで必要十分な API セット
 
 ---
 
@@ -301,6 +301,7 @@ cc-memory setup
 ## CLI コマンド
 
 ```bash
+cc-memory serve               # MCP サーバー起動（Claude Code 連携用）
 cc-memory setup               # DB 初期化
 cc-memory doctor              # 環境チェック（sqlite-vec 状態含む）
 cc-memory status              # プロジェクト・メモリの統計表示
@@ -410,7 +411,7 @@ v1 のコードは [`v1` ブランチ](https://github.com/0xchoux1/cc-memory/tre
 |---|---|---|
 | **メモリモデル** | 3 層（Working / Episodic / Semantic） | 2 スコープ（Shared / Personal） |
 | **アクセス制御** | チーム・API キーベース | Role-based（manager / worker） |
-| **API 数** | 20+ ツール | 8 ツール |
+| **API 数** | 20+ ツール | 11 ツール |
 | **同期** | Tachikoma / Git / Cloud | なし（ローカル完結） |
 | **設計思想** | 機能豊富 | シンプル・必要十分 |
 
@@ -432,7 +433,7 @@ A memory server for multi-agent development that separates **shared knowledge** 
 - **SQLite** — local storage, no cloud, privacy-first
 - **Hybrid search** — sqlite-vec vector search + keyword search (v3)
 - **Short-term memory** — auto-indexes JSONL session logs with hybrid search (v3.2)
-- **9 API endpoints** — simple and sufficient
+- **11 MCP tools** — simple and sufficient
 
 ### Quick Start
 
@@ -480,6 +481,34 @@ Add to `~/.claude/settings.json`:
 ### Migration from v1
 
 v1 is preserved on the [`v1` branch](https://github.com/0xchoux1/cc-memory/tree/v1). v2 databases are not compatible with v1 — start fresh.
+
+---
+
+## ドキュメント検証
+
+このドキュメントは cc-memory **v3.2.0** で検証済みです。
+
+```bash
+# 検証手順
+npm run build
+cc-memory --help          # CLI コマンド一覧
+cc-memory doctor          # 環境チェック
+```
+
+### Deprecated → Current コマンドマッピング
+
+v1 のドキュメントやチュートリアルに記載されていたコマンドの対応表です。
+
+| v1 コマンド / 機能 | v3 での対応 |
+|---|---|
+| `cc-memory-cli team create` | `project_create` MCP ツール |
+| `cc-memory-cli agent add` | `agent_register` MCP ツール |
+| `cc-memory-cli agent list` | `agent_list` MCP ツール |
+| `cc-memory-cli apikey regenerate` | 廃止（API キー不要） |
+| `npm run start:http` | `cc-memory serve` |
+| WebSocket sync | 廃止（ローカル SQLite のみ） |
+| Observer ロール | 廃止（manager / worker のみ） |
+| Working / Episodic / Semantic | Shared / Personal スコープ |
 
 ---
 

@@ -121,9 +121,17 @@ async function migrateEmbeddings() {
   storage.close();
 }
 
+async function serve() {
+  // Dynamic import to avoid loading MCP dependencies for CLI commands
+  await import("./server.js");
+}
+
 // Main
 const command = process.argv[2];
 switch (command) {
+  case "serve":
+    serve();
+    break;
   case "setup":
     setup();
     break;
@@ -139,6 +147,6 @@ switch (command) {
   default:
     console.log("cc-memory v3 CLI");
     console.log("Usage: cc-memory <command>");
-    console.log("Commands: setup, doctor, status, migrate-embeddings");
+    console.log("Commands: serve, setup, doctor, status, migrate-embeddings");
     process.exit(command ? 1 : 0);
 }
