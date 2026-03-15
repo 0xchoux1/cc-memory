@@ -11,6 +11,7 @@
   - docs/agent-manager-architecture.md を v3 に全面書き換え
   - Deprecated → Current コマンドマッピング表を追加
   - CLI コマンド一覧に `serve` を追加
+- `docs/QUICKSTART.md` 追加 — 5分で最初の recall まで到達するガイド
 
 ## v3.2.0
 
