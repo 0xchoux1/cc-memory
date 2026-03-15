@@ -265,4 +265,78 @@ describe("Tool Handler", () => {
       expect(result.count).toBeGreaterThanOrEqual(1);
     });
   });
+
+  // --- Safe defaults tests ---
+  describe("safe defaults", () => {
+    beforeEach(async () => {
+      // Register agent in default project
+      await handle("agent_register", { project_id: "default", agent_id: "default-agent", role: "manager" });
+    });
+
+    it("project_id defaults to 'default' and is reported", async () => {
+      const result = await parse("memory_store", {
+        scope: "shared", agent_id: "default-agent", content: "no project specified",
+      });
+      expect(result.ok).toBe(true);
+      expect(result.defaults_applied).toBeDefined();
+      expect(result.defaults_applied.project_id).toBe("default");
+    });
+
+    it("explicit project_id is not reported as default", async () => {
+      await handle("project_create", { project_id: "explicit", description: "Test" });
+      await handle("agent_register", { project_id: "explicit", agent_id: "mgr", role: "manager" });
+
+      const result = await parse("memory_store", {
+        scope: "shared", agent_id: "mgr", content: "explicit project", project_id: "explicit",
+      });
+      expect(result.ok).toBe(true);
+      // defaults_applied should be undefined or not contain project_id
+      if (result.defaults_applied) {
+        expect(result.defaults_applied.project_id).toBeUndefined();
+      }
+    });
+
+    it("caller_id/agent_id without default env returns error", async () => {
+      // When CC_MEMORY_DEFAULT_AGENT is not set, omitting agent_id should fail
+      const result = await parse("memory_store", {
+        scope: "shared", content: "no agent",
+      });
+      expect(result.ok).toBe(false);
+      // Error details contain the field name
+      const errorStr = JSON.stringify(result);
+      expect(errorStr).toContain("agent_id");
+    });
+
+    it("memory_recall defaults project_id and reports it", async () => {
+      await handle("memory_store", {
+        scope: "shared", agent_id: "default-agent", content: "findme",
+      });
+
+      const result = await parse("memory_recall", {
+        scope: "shared", query: "findme", caller_id: "default-agent",
+      });
+      expect(result.ok).toBe(true);
+      expect(result.defaults_applied).toBeDefined();
+      expect(result.defaults_applied.project_id).toBe("default");
+    });
+
+    it("memory_list defaults project_id", async () => {
+      const result = await parse("memory_list", { scope: "shared" });
+      expect(result.ok).toBe(true);
+      expect(result.defaults_applied).toBeDefined();
+      expect(result.defaults_applied.project_id).toBe("default");
+    });
+
+    it("memory_delete defaults project_id", async () => {
+      const stored = await parse("memory_store", {
+        scope: "shared", agent_id: "default-agent", content: "will delete",
+      });
+      const result = await parse("memory_delete", {
+        memory_id: stored.memory.id, caller_id: "default-agent",
+      });
+      expect(result.ok).toBe(true);
+      expect(result.defaults_applied).toBeDefined();
+      expect(result.defaults_applied.project_id).toBe("default");
+    });
+  });
 });
