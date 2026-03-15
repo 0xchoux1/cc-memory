@@ -2,6 +2,7 @@
 
 > マルチエージェント開発で、共有知識と専門知識を分離管理するメモリサーバー
 
+[![CI](https://github.com/0xchoux1/cc-memory/actions/workflows/build-and-test.yml/badge.svg)](https://github.com/0xchoux1/cc-memory/actions/workflows/build-and-test.yml)
 [![MIT License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D18.0.0-green.svg)](https://nodejs.org/)
 [![MCP](https://img.shields.io/badge/MCP-Compatible-purple.svg)](https://modelcontextprotocol.io/)
@@ -541,6 +542,14 @@ v1 のドキュメントやチュートリアルに記載されていたコマ�
 | WebSocket sync | 廃止（ローカル SQLite のみ） |
 | Observer ロール | 廃止（manager / worker のみ） |
 | Working / Episodic / Semantic | Shared / Personal スコープ |
+
+---
+
+## Contributing
+
+- **PR 必須** — `main` への直接 push は禁止。feature ブランチから PR を出してください
+- **Required check: `build-and-test`** — すべての PR は `npm run build` と `npm test` を通過する必要があります
+- **レビュー** — Falak（OpenClaw）が PR レビューを担当します
 
 ---
 
