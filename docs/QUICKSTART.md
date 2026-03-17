@@ -4,9 +4,7 @@
 
 ## TL;DR — 最短3コマンド
 
-```bash
-npm install -g cc-memory && cc-memory setup
-```
+MCP 設定を追加したら、すぐに使えます（インストール不要）:
 
 Claude Code で:
 ```
@@ -18,24 +16,7 @@ memory_recall を実行: scope="shared", query="Hello", caller_id="me", project_
 
 ---
 
-## Step 1: インストール（1分）
-
-```bash
-npm install -g cc-memory
-cc-memory setup
-```
-
-期待される出力:
-```
-Setting up cc-memory v3...
-  sqlite-vec: enabled ✅
-Database created at: /path/to/cc-memory.db
-Setup complete.
-```
-
-> sqlite-vec が `not available ⚠️` でも動作します（キーワード検索のみになります）。
-
-## Step 2: Claude Code に接続（1分）
+## Step 1: Claude Code に接続（1分）
 
 `~/.claude/settings.json` に追加:
 
@@ -43,12 +24,14 @@ Setup complete.
 {
   "mcpServers": {
     "cc-memory": {
-      "command": "cc-memory",
-      "args": ["serve"]
+      "command": "npx",
+      "args": ["-y", "cc-memory", "serve"]
     }
   }
 }
 ```
+
+> グローバルインストール不要。npx が自動でダウンロード・キャッシュします。初回起動時に DB も自動作成されます。
 
 Claude Code を再起動して、MCP ツールが認識されていることを確認:
 
@@ -56,7 +39,7 @@ Claude Code を再起動して、MCP ツールが認識されていることを�
 > cc-memory の memory_store ツールを使えますか？
 ```
 
-## Step 3: プロジェクト & エージェント登録（1分）
+## Step 2: プロジェクト & エージェント登録（1分）
 
 Claude Code 内で以下を依頼:
 
@@ -76,7 +59,7 @@ Claude Code 内で以下を依頼:
 { "success": true, "agent_id": "lead", "role": "manager", "project_id": "my-app" }
 ```
 
-## Step 4: メモリを保存（shared + personal）（1分）
+## Step 3: メモリを保存（shared + personal）（1分）
 
 ### Shared メモリ（チーム共有）
 
@@ -105,7 +88,7 @@ memory_store を実行:
   project_id: "my-app"
 ```
 
-## Step 5: メモリを検索（1分）
+## Step 4: メモリを検索（1分）
 
 ### memory_recall
 
