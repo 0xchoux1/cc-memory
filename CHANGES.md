@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- MCP 設定のデフォルトを `npx -y cc-memory serve` に変更（PR #28、docs のみ、次リリースに同梱）
+- KPI 週次テンプレート追加（`docs/KPI-WEEKLY-TEMPLATE.md`）
+
 ## v3.3.0
 
 - `session_recall` に `project_path` フィルタを追加 — 特定プロジェクトのセッションのみに絞り込み検索可能
